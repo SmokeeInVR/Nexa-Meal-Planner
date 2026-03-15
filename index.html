@@ -810,6 +810,12 @@ Prices must be realistic for US grocery stores. estimatedTotal must not exceed $
     const cookMeals=mealPlan.weeklyMealPlan.filter(d=>['Sunday','Tuesday','Thursday'].includes(d.day)&&!d.isLeftoverNight).map(d=>d.dinner.name);
     mealHistory=[{date:new Date().toISOString(),cookMealNames:cookMeals,cuisineStyle:cuisineStyle||undefined,estimatedTotal:mealPlan.estimatedTotal},...mealHistory].slice(0,5);
     localStorage.setItem('fmp_history',JSON.stringify(mealHistory));
+    // Push to Railway so Nexa OS can read meal data
+    fetch('https://nexa-finance-production.up.railway.app/api/meals/save',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({plan:mealPlan,estimatedTotal:mealPlan.estimatedTotal,cookMeals,cuisineStyle:cuisineStyle||null})
+    }).catch(e=>console.warn('Meal sync to Railway failed:',e));
     renderShopping(); renderRecipes(); renderHistoryCount();
     renderPlanReady();
   }catch(e){
