@@ -387,6 +387,10 @@ input:checked + .toggle-slider2::before { transform:translateX(18px); }
         <div>
           <div class="section-title">Generate Plan</div>
           <div class="section-sub" style="margin-bottom:0;">Personalized weekly meal plan with AI</div>
+          <div id="fitnessTargetsBar" style="display:none;background:rgba(212,165,62,0.08);border:1px solid rgba(212,165,62,0.2);border-radius:8px;padding:10px 12px;margin-top:10px;font-size:11px;color:var(--text-dim);">
+            <div style="font-size:9px;letter-spacing:2px;color:var(--gold);font-weight:700;margin-bottom:6px;">🏋 NEXAFIT TARGETS LOADED</div>
+            <div id="fitnessTargetsText"></div>
+          </div>
         </div>
         <button onclick="toggleHistory()" style="display:flex;align-items:center;gap:5px;padding:7px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:7px;font-size:12px;font-weight:600;color:var(--text-dim);cursor:pointer;">
           📋 History <span id="historyCount" style="display:none;background:var(--primary);color:#fff;border-radius:50%;width:16px;height:16px;font-size:10px;display:inline-flex;align-items:center;justify-content:center;"></span>
@@ -583,6 +587,37 @@ function init(){
   if(!apiKey) showKeyModal();
 }
 
+async function syncFitnessTargets(){
+  try{
+    const res=await fetch('https://nexa-finance-production.up.railway.app/api/fitness/summary');
+    if(!res.ok)return;
+    const data=await res.json();
+    if(data&&(data.calorieTarget||data.proteinTarget)){
+      fitnessTargets={
+        calories:data.calorieTarget||0,
+        protein:data.proteinTarget||0,
+        carbs:data.carbTarget||0,
+        fat:data.fatTarget||0,
+        tdee:data.tdee||0,
+      };
+      localStorage.setItem('fmp_fitness_targets',JSON.stringify(fitnessTargets));
+      renderFitnessTargets();
+    }
+  }catch(e){
+    // fallback to cached
+    const cached=localStorage.getItem('fmp_fitness_targets');
+    if(cached){fitnessTargets=JSON.parse(cached);renderFitnessTargets();}
+  }
+}
+function renderFitnessTargets(){
+  const bar=document.getElementById('fitnessTargetsBar');
+  const txt=document.getElementById('fitnessTargetsText');
+  if(!bar||!txt)return;
+  if(!fitnessTargets){bar.style.display='none';return;}
+  bar.style.display='block';
+  const f=fitnessTargets;
+  txt.innerHTML=`Calories: <strong>${f.calories}</strong> kcal &nbsp;·&nbsp; Protein: <strong>${f.protein}g</strong> &nbsp;·&nbsp; Carbs: <strong>${f.carbs}g</strong> &nbsp;·&nbsp; Fat: <strong>${f.fat}g</strong>`;
+}
 function loadState(){
   try { pantryState = JSON.parse(localStorage.getItem('fmp_pantry')||'{}'); } catch{}
   ALL_ITEMS.forEach(i=>{ if(!pantryState[i]) pantryState[i]='some'; });
@@ -634,15 +669,28 @@ function cyclePantry(item){
   renderPantry();
 }
 
+function savePantryQty(item,val){
+  pantryQty[item]=val;
+  localStorage.setItem('fmp_pantry_qty',JSON.stringify(pantryQty));
+}
+
 function pantryItemHTML(item){
   const status = pantryState[item]||'some';
   const icon = ITEM_ICONS[item]||'📦';
   const label = item.charAt(0).toUpperCase()+item.slice(1);
-  return `<button class="pantry-item ${status}" onclick="cyclePantry('${item.replace(/'/g,"\\'")}')">
+  const qty = (pantryQty||{})[item]||'';
+  const qtyInput = status!=='out' ? `<input type="text" value="${qty}" placeholder="qty" onclick="event.stopPropagation()" onchange="savePantryQty('${item}',this.value)" style="width:88%;font-size:9px;background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.15);border-radius:4px;padding:2px 4px;color:inherit;text-align:center;margin-top:2px;outline:none;">` : '';
+  return `<div class="pantry-item ${status}" onclick="cyclePantry('${item.replace(/'/g,"\\'")}')">
     <div class="pantry-item-icon">${icon}</div>
     <div class="pantry-item-name">${label}</div>
     <div class="pantry-item-status">${status}</div>
-  </button>`;
+    ${qtyInput}
+  </div>`;
+}
+function savePantryQty(item,val){
+  if(!pantryQty)pantryQty={};
+  pantryQty[item]=val;
+  localStorage.setItem('fmp_pantry_qty',JSON.stringify(pantryQty));
 }
 
 function renderPantry(){
@@ -717,9 +765,9 @@ async function generatePlan(){
   btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Generating Plan...';
   status.style.display='block';
 
-  const plentyItems=ALL_ITEMS.filter(i=>pantryState[i]==='plenty');
-  const outItems=ALL_ITEMS.filter(i=>pantryState[i]==='out');
-  const someItems=ALL_ITEMS.filter(i=>pantryState[i]==='some');
+  const plentyItems=[...PANTRY_ITEMS,...VEG_ITEMS,...SPICE_ITEMS].filter(i=>(pantryState[i]||'some')==='plenty').map(i=>{ const qty=pantryQty[i]; return qty?i+' ('+qty+')':i; });
+  const outItems=[...PANTRY_ITEMS,...VEG_ITEMS,...SPICE_ITEMS].filter(i=>(pantryState[i]||'some')==='out');
+  const someItems=[...PANTRY_ITEMS,...VEG_ITEMS,...SPICE_ITEMS].filter(i=>(pantryState[i]||'some')==='some').map(i=>{ const qty=pantryQty[i]; return qty?i+' ('+qty+')':i; });
   const allExcl=[...exclusions,...(otherExcl.trim()?[otherExcl.trim()]:[])];
   const prevMeals=mealHistory.length>0?mealHistory[0].cookMealNames:[];
 
@@ -745,6 +793,10 @@ Include "workDayPacks" in JSON (all 3 days: Friday, Saturday, Sunday).`:'';
   const prompt=`You are a family meal planner for a household with a 1-year-old baby. Plan this week's dinners using a batch-cook strategy.${exclusionLine}${cuisineLine}${seasonalLine}${historyLine}
 
 FAMILY: ${servings} adult(s) + 1 baby (1 year old)
+
+${fitnessTargets ? `NUTRITION TARGETS (from NexaFit — build meals around these):
+Daily calories: ${fitnessTargets.calories} kcal | Protein: ${fitnessTargets.protein}g | Carbs: ${fitnessTargets.carbs}g | Fat: ${fitnessTargets.fat}g
+Prioritize high-protein meals to hit daily protein target. Include protein estimates per serving in recipe notes.` : ''}
 
 PANTRY STATUS:
 - PLENTY (have plenty, avoid buying more as main ingredient): ${plentyItems.join(', ')||'none'}
@@ -782,7 +834,7 @@ Return ONLY valid JSON (no markdown, no code blocks):
     "seasonings": [{"name": "string", "estimatedPrice": number, "mealNote": "string"}]
   },
   "weeklyMealPlan": [
-    {"day": "Sunday","alsoEatenOn": "Monday","dinner": {"name": "Meal Name","ingredients": ["2.5 lbs chicken thighs"],"steps": ["Step 1"],"babyVersion": "How to adapt for a 1-year-old","seasonings": "Seasoning details","batchNote": "Double recipe for ${servings} adults × 2 nights."}},
+    {"day": "Sunday","alsoEatenOn": "Monday","dinner": {"name": "Meal Name","ingredients": ["2.5 lbs chicken thighs"],"servingSize": "Makes 4 servings (2 adults x 2 nights)","proteinPerServing": "38g protein","caloriesPerServing": "520 cal","steps": ["Step 1"],"babyVersion": "How to adapt for a 1-year-old","seasonings": "Seasoning details","batchNote": "Double recipe for ${servings} adults × 2 nights."}},
     {"day": "Monday","isLeftoverNight": true,"dinner": {"name": "Same Meal Name","ingredients": [],"steps": [],"babyVersion": "Reheat gently","seasonings": ""}}
   ],
   "estimatedTotal": number,
@@ -796,7 +848,7 @@ Prices must be realistic for US grocery stores. estimatedTotal must not exceed $
     const resp=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
       headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:8192,messages:[{role:'user',content:prompt}]})
+      body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:8192,messages:[{role:'user',content:prompt}]})
     });
     const d=await resp.json();
     if(!resp.ok) throw new Error(d.error?.message||resp.status);
@@ -854,7 +906,7 @@ Return ONLY valid JSON (no markdown):
     const resp=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
       headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2000,messages:[{role:'user',content:prompt}]})
+      body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:2000,messages:[{role:'user',content:prompt}]})
     });
     const d=await resp.json();
     if(!resp.ok) throw new Error(d.error?.message||resp.status);
@@ -912,10 +964,24 @@ function renderShopping(){
   });
   const pct=Math.min((total/budget)*100,100);
   const over=total>budget;
-  let html=`<div class="budget-bar-wrap">
-    <div class="budget-bar-labels"><span>Budget Progress</span><span>$${total.toFixed(2)} / $${budget.toFixed(2)}</span></div>
+  // Build nutrition summary from meal plan
+  let proteinMeals=[]; let calMeals=[];
+  if(mealPlan.weeklyMealPlan){
+    mealPlan.weeklyMealPlan.filter(d=>!d.isLeftoverNight).forEach(d=>{
+      if(d.dinner?.proteinPerServing) proteinMeals.push(d.dinner.proteinPerServing);
+      if(d.dinner?.caloriesPerServing) calMeals.push(d.dinner.caloriesPerServing);
+    });
+  }
+  const nutritionBanner = fitnessTargets ? `<div style="background:rgba(212,165,62,0.08);border:1px solid rgba(212,165,62,0.2);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:11px;">
+    <div style="font-size:9px;letter-spacing:2px;color:var(--gold);font-weight:700;margin-bottom:6px;">🏋 NUTRITION TARGETS</div>
+    <div style="color:var(--text-dim);">Daily goal: <strong style="color:var(--text);">${fitnessTargets.calories} cal</strong> · <strong style="color:var(--text);">${fitnessTargets.protein}g protein</strong> · <strong style="color:var(--text);">${fitnessTargets.carbs}g carbs</strong> · <strong style="color:var(--text);">${fitnessTargets.fat}g fat</strong></div>
+    ${proteinMeals.length ? `<div style="color:var(--text-dim);margin-top:4px;">Meal protein: ${proteinMeals.join(', ')}</div>` : ''}
+  </div>` : '';
+
+  let html=nutritionBanner+`<div class="budget-bar-wrap">
+    <div class="budget-bar-labels"><span>Budget Progress</span><span>$\${total.toFixed(2)} / $${budget.toFixed(2)}</span></div>
     <div class="budget-bar-bg"><div class="budget-bar-fill ${over?'over':''}" style="width:${pct}%"></div></div>
-    <div class="budget-sub-row"><span>Checked: $${checked.toFixed(2)}</span><span>Remaining: $${(total-checked).toFixed(2)}</span></div>
+    <div class="budget-sub-row"><span>Checked: $\${checked.toFixed(2)}</span><span>Remaining: $\${(total-checked).toFixed(2)}</span></div>
   </div>`;
   Object.entries(list).forEach(([cat,items])=>{
     if(!items||!items.length) return;
