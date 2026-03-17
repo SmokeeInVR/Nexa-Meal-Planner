@@ -564,6 +564,9 @@ let wallModeOn = false;
 let wallClockInterval = null;
 let expandedCards = {};
 let stepChecked = {};
+let pantryQty = {};
+let fitnessTargets = null;
+let planReady = false;
 
 // ══ INIT ══
 function init(){
@@ -585,6 +588,8 @@ function init(){
   renderRecipes();
   renderHistoryCount();
   if(!apiKey) showKeyModal();
+  syncFitnessTargets();
+  renderFitnessTargets();
 }
 
 async function syncFitnessTargets(){
@@ -620,7 +625,11 @@ function renderFitnessTargets(){
 }
 function loadState(){
   try { pantryState = JSON.parse(localStorage.getItem('fmp_pantry')||'{}'); } catch{}
+  // migrate any old object format back to strings
+  Object.keys(pantryState).forEach(k=>{ if(typeof pantryState[k]==='object'&&pantryState[k].status) pantryState[k]=pantryState[k].status; });
   ALL_ITEMS.forEach(i=>{ if(!pantryState[i]) pantryState[i]='some'; });
+  try { pantryQty = JSON.parse(localStorage.getItem('fmp_pantry_qty')||'{}'); } catch{}
+  try { fitnessTargets = JSON.parse(localStorage.getItem('fmp_fitness_targets')||'null'); } catch{}
   try { mealPlan = JSON.parse(localStorage.getItem('fmp_plan')||'null'); } catch{}
   try { checkedItems = JSON.parse(localStorage.getItem('fmp_checked')||'{}'); } catch{}
   try { exclusions = JSON.parse(localStorage.getItem('fmp_excl')||'[]'); } catch{}
@@ -687,12 +696,6 @@ function pantryItemHTML(item){
     ${qtyInput}
   </div>`;
 }
-function savePantryQty(item,val){
-  if(!pantryQty)pantryQty={};
-  pantryQty[item]=val;
-  localStorage.setItem('fmp_pantry_qty',JSON.stringify(pantryQty));
-}
-
 function renderPantry(){
   document.getElementById('proteinsGrid').innerHTML = PANTRY_ITEMS.map(pantryItemHTML).join('');
   document.getElementById('vegetablesGrid').innerHTML = VEG_ITEMS.map(pantryItemHTML).join('');
