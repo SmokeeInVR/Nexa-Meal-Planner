@@ -387,8 +387,28 @@ input:checked + .toggle-slider2::before { transform:translateX(18px); }
         <div>
           <div class="section-title">Generate Plan</div>
           <div class="section-sub" style="margin-bottom:0;">Personalized weekly meal plan with AI</div>
+
+          <!-- MEAL TYPES TO INCLUDE -->
+          <div class="label-sm" style="margin-top:16px;margin-bottom:8px;">Include in plan</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:4px;">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text);">
+              <input type="checkbox" id="includeBreakfast" style="accent-color:var(--amber);"> Breakfast ideas
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text);">
+              <input type="checkbox" id="includeLunch" checked style="accent-color:var(--amber);"> Lunch ideas
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text);">
+              <input type="checkbox" id="includeSnacks" checked style="accent-color:var(--amber);"> Snack suggestions
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text);">
+              <input type="checkbox" id="lightBreakfast" style="accent-color:var(--amber);"> Light breakfast only
+            </label>
+          </div>
           <div id="fitnessTargetsBar" style="display:none;background:rgba(212,165,62,0.08);border:1px solid rgba(212,165,62,0.2);border-radius:8px;padding:10px 12px;margin-top:10px;font-size:11px;color:var(--text-dim);">
             <div style="font-size:9px;letter-spacing:2px;color:var(--gold);font-weight:700;margin-bottom:6px;">🏋 NEXAFIT TARGETS LOADED</div>
+            <div id="fitnessTargetsText"></div>
+          </div>
+          
             <div id="fitnessTargetsText"></div>
           </div>
         </div>
@@ -590,6 +610,10 @@ function init(){
   if(!apiKey) showKeyModal();
   syncFitnessTargets();
   renderFitnessTargets();
+  // Try to load from cloud on startup
+  loadFromCloud().then(synced => {
+    if(synced){ renderPantry(); renderShopping(); renderRecipes(); renderPlanReady(); }
+  });
 }
 
 async function syncFitnessTargets(){
@@ -642,6 +666,42 @@ function loadState(){
   try { mealHistory = JSON.parse(localStorage.getItem('fmp_history')||'[]'); } catch{}
 }
 
+const SYNC_URL = 'https://nexa-finance-production.up.railway.app';
+const FAMILY_ID = localStorage.getItem('fmp_family_id')||'nexa_family';
+
+async function syncToCloud(){
+  try{
+    const data = {
+      pantryState, pantryQty, mealPlan, checkedItems,
+      exclusions, otherExcl, cuisineStyle, weeklyBudget,
+      servings, seasonalMode, workPacks, mealHistory
+    };
+    await fetch(`${SYNC_URL}/api/sync/save`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({familyId:FAMILY_ID, appName:'meal_planner', data})
+    });
+  }catch(e){ console.warn('Cloud sync failed:', e); }
+}
+
+async function loadFromCloud(){
+  try{
+    const res = await fetch(`${SYNC_URL}/api/sync/load?familyId=${FAMILY_ID}&appName=meal_planner`);
+    if(!res.ok) return false;
+    const d = await res.json();
+    if(!d?.data) return false;
+    const data = d.data;
+    if(data.pantryState){ Object.assign(pantryState, data.pantryState); localStorage.setItem('fmp_pantry',JSON.stringify(pantryState)); }
+    if(data.pantryQty){ Object.assign(pantryQty, data.pantryQty); localStorage.setItem('fmp_pantry_qty',JSON.stringify(pantryQty)); }
+    if(data.mealPlan){ mealPlan=data.mealPlan; localStorage.setItem('fmp_plan',JSON.stringify(mealPlan));
+    syncToCloud(); }
+    if(data.weeklyBudget){ weeklyBudget=data.weeklyBudget; }
+    if(data.servings){ servings=data.servings; }
+    if(data.exclusions){ exclusions=data.exclusions; }
+    if(data.mealHistory){ mealHistory=data.mealHistory; }
+    return true;
+  }catch(e){ return false; }
+}
+
 function savePref(){
   localStorage.setItem('fmp_excl',JSON.stringify(exclusions));
   localStorage.setItem('fmp_other',otherExcl);
@@ -682,13 +742,40 @@ function savePantryQty(item,val){
   pantryQty[item]=val;
   localStorage.setItem('fmp_pantry_qty',JSON.stringify(pantryQty));
 }
+function savePantryUnit(item,unit){
+  if(!pantryQty[item]) pantryQty[item]='';
+  // Store as "qty|unit" format e.g. "2|lbs" or "1|bottle"
+  const existing = pantryQty[item]||'';
+  const qtyPart = existing.includes('|') ? existing.split('|')[0] : existing;
+  pantryQty[item] = qtyPart ? `${qtyPart}|${unit}` : `|${unit}`;
+  localStorage.setItem('fmp_pantry_qty',JSON.stringify(pantryQty));
+}
+function getPantryDisplay(item){
+  const raw = pantryQty[item]||'';
+  if(!raw) return '';
+  if(raw.includes('|')){
+    const [qty,unit] = raw.split('|');
+    return qty&&unit ? `${qty} ${unit}` : qty||unit||'';
+  }
+  return raw;
+}
 
 function pantryItemHTML(item){
   const status = pantryState[item]||'some';
   const icon = ITEM_ICONS[item]||'📦';
   const label = item.charAt(0).toUpperCase()+item.slice(1);
   const qty = (pantryQty||{})[item]||'';
-  const qtyInput = status!=='out' ? `<input type="text" value="${qty}" placeholder="qty" onclick="event.stopPropagation()" onchange="savePantryQty('${item}',this.value)" style="width:88%;font-size:9px;background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.15);border-radius:4px;padding:2px 4px;color:inherit;text-align:center;margin-top:2px;outline:none;">` : '';
+  const qtyRaw = pantryQty[item]||'';
+  const qtyVal = qtyRaw.includes('|') ? qtyRaw.split('|')[0] : qtyRaw;
+  const unitVal = qtyRaw.includes('|') ? qtyRaw.split('|')[1] : '';
+  const units = ['lbs','oz','g','kg','count','bottle','bag','box','bunch','can','pack'];
+  const qtyInput = status!=='out' ? `<div onclick="event.stopPropagation()" style="display:flex;gap:2px;margin-top:3px;width:100%;">
+    <input type="text" value="${qtyVal}" placeholder="qty" onchange="savePantryQty('${item}',this.value+(pantryQty['${item}']?.includes('|')?'|'+pantryQty['${item}'].split('|')[1]:''))" style="flex:1;min-width:0;font-size:9px;background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.15);border-radius:4px 0 0 4px;padding:2px 4px;color:inherit;text-align:center;outline:none;">
+    <select onchange="savePantryUnit('${item}',this.value)" style="font-size:8px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.15);border-left:none;border-radius:0 4px 4px 0;color:inherit;padding:1px;outline:none;max-width:44px;">
+      <option value="">—</option>
+      ${units.map(u=>`<option value="${u}"${unitVal===u?' selected':''}>${u}</option>`).join('')}
+    </select>
+  </div>` : '';
   return `<div class="pantry-item ${status}" onclick="cyclePantry('${item.replace(/'/g,"\\'")}')">
     <div class="pantry-item-icon">${icon}</div>
     <div class="pantry-item-name">${label}</div>
@@ -768,9 +855,9 @@ async function generatePlan(){
   btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Generating Plan...';
   status.style.display='block';
 
-  const plentyItems=[...PANTRY_ITEMS,...VEG_ITEMS,...SPICE_ITEMS].filter(i=>(pantryState[i]||'some')==='plenty').map(i=>{ const qty=pantryQty[i]; return qty?i+' ('+qty+')':i; });
+  const plentyItems=[...PANTRY_ITEMS,...VEG_ITEMS,...SPICE_ITEMS].filter(i=>(pantryState[i]||'some')==='plenty').map(i=>{ const raw=pantryQty[i]||''; if(!raw)return i; const display=raw.includes('|')?raw.split('|').filter(Boolean).join(' '):raw; return display?i+' ('+display+')':i; });
   const outItems=[...PANTRY_ITEMS,...VEG_ITEMS,...SPICE_ITEMS].filter(i=>(pantryState[i]||'some')==='out');
-  const someItems=[...PANTRY_ITEMS,...VEG_ITEMS,...SPICE_ITEMS].filter(i=>(pantryState[i]||'some')==='some').map(i=>{ const qty=pantryQty[i]; return qty?i+' ('+qty+')':i; });
+  const someItems=[...PANTRY_ITEMS,...VEG_ITEMS,...SPICE_ITEMS].filter(i=>(pantryState[i]||'some')==='some').map(i=>{ const raw=pantryQty[i]||''; if(!raw)return i; const display=raw.includes('|')?raw.split('|').filter(Boolean).join(' '):raw; return display?i+' ('+display+')':i; });
   const allExcl=[...exclusions,...(otherExcl.trim()?[otherExcl.trim()]:[])];
   const prevMeals=mealHistory.length>0?mealHistory[0].cookMealNames:[];
 
@@ -796,6 +883,10 @@ Include "workDayPacks" in JSON (all 3 days: Friday, Saturday, Sunday).`:'';
   const prompt=`You are a family meal planner for a household with a 1-year-old baby. Plan this week's dinners using a batch-cook strategy.${exclusionLine}${cuisineLine}${seasonalLine}${historyLine}
 
 FAMILY: ${servings} adult(s) + 1 baby (1 year old)
+
+${document.getElementById('includeBreakfast')?.checked || document.getElementById('lightBreakfast')?.checked ? `BREAKFAST: ${document.getElementById('lightBreakfast')?.checked ? 'Suggest 2-3 LIGHT breakfast options (yogurt, overnight oats, smoothie, fruit) that are quick and use pantry items. Include baby-safe versions.' : 'Suggest 2-3 full breakfast ideas for the week that overlap with dinner ingredients.'}` : ''}
+${document.getElementById('includeLunch')?.checked ? `LUNCH: Suggest 2-3 simple lunch ideas using leftovers from batch-cook dinners. My wife takes packed lunches to work. Include baby-safe versions.` : ''}
+${document.getElementById('includeSnacks')?.checked ? `SNACKS: Suggest 3-4 simple snack options for the week (one for adults, one baby-safe). Use pantry overlap. Keep it affordable.` : ''}
 
 ${fitnessTargets ? `NUTRITION TARGETS (from NexaFit — build meals around these):
 Daily calories: ${fitnessTargets.calories} kcal | Protein: ${fitnessTargets.protein}g | Carbs: ${fitnessTargets.carbs}g | Fat: ${fitnessTargets.fat}g
@@ -841,7 +932,10 @@ Return ONLY valid JSON (no markdown, no code blocks):
     {"day": "Monday","isLeftoverNight": true,"dinner": {"name": "Same Meal Name","ingredients": [],"steps": [],"babyVersion": "Reheat gently","seasonings": ""}}
   ],
   "estimatedTotal": number,
-  "babyNewFoods": ["food1", "food2"]${workPackJsonHint}
+  "babyNewFoods": ["food1", "food2"],
+  "breakfastIdeas": [{"name": "string", "prepTime": "5 min", "babyVersion": "string"}],
+  "lunchIdeas": [{"name": "string", "prepTime": "10 min", "babyVersion": "string"}],
+  "snackIdeas": [{"name": "string", "babyVersion": "string"}]${workPackJsonHint}
 }
 
 Include all 7 days in this order: Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday.
@@ -925,8 +1019,45 @@ Return ONLY valid JSON (no markdown):
       return d;
     });
     localStorage.setItem('fmp_plan',JSON.stringify(mealPlan));
-    stepChecked={}; renderRecipes();
+    stepChecked={};
+    // Regenerate grocery list to reflect new ingredients
+    await regenerateGroceryList();
+    renderRecipes();
+    renderShopping();
   }catch(e){ alert('Swap failed: '+(e.message||'Please try again')); }
+}
+
+async function regenerateGroceryList(){
+  if(!mealPlan||!apiKey) return;
+  try{
+    const meals = mealPlan.weeklyMealPlan.filter(d=>!d.isLeftoverNight).map(d=>d.dinner);
+    const allIngredients = meals.flatMap(m=>m.ingredients||[]);
+    const prompt = `Given these meal ingredients for the week, generate an optimized grocery list with realistic US prices.
+Meals: ${meals.map(m=>m.name).join(', ')}
+All ingredients needed: ${allIngredients.join(', ')}
+Budget: $${weeklyBudget}
+Family: ${servings} adults + 1 baby
+
+Return ONLY valid JSON:
+{"groceryList":{"produce":[{"name":"string","estimatedPrice":0,"mealNote":"string"}],"protein":[{"name":"string","estimatedPrice":0,"mealNote":"string"}],"dairy":[{"name":"string","estimatedPrice":0,"mealNote":"string"}],"pantry":[{"name":"string","estimatedPrice":0,"mealNote":"string"}],"seasonings":[{"name":"string","estimatedPrice":0,"mealNote":"string"}]},"estimatedTotal":0}`;
+
+    const resp = await fetch('https://nexa-finance-production.up.railway.app/api/ai/chat',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({apiKey, system:'Return only valid JSON.', messages:[{role:'user',content:prompt}], max_tokens:2000})
+    });
+    const d = await resp.json();
+    if(!resp.ok) return;
+    let text = d.content?.[0]?.text||d.text||'';
+    const match = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if(match) text = match[1].trim();
+    const s = text.indexOf('{'); const e = text.lastIndexOf('}');
+    const parsed = JSON.parse(text.slice(s,e+1));
+    if(parsed.groceryList){
+      mealPlan.groceryList = parsed.groceryList;
+      if(parsed.estimatedTotal) mealPlan.estimatedTotal = parsed.estimatedTotal;
+      localStorage.setItem('fmp_plan', JSON.stringify(mealPlan));
+    }
+  }catch(e){ console.warn('Grocery regen failed:', e); }
 }
 
 function renderPlanReady(){
@@ -936,9 +1067,13 @@ function renderPlanReady(){
   const nights=mealPlan.weeklyMealPlan.length;
   const packs=mealPlan.workDayPacks?.length||0;
   const baby=(mealPlan.babyNewFoods||[]).join(', ');
+  const extras=[];
+  if(mealPlan.breakfastIdeas?.length) extras.push(`${mealPlan.breakfastIdeas.length} breakfast ideas`);
+  if(mealPlan.lunchIdeas?.length) extras.push(`${mealPlan.lunchIdeas.length} lunch ideas`);
+  if(mealPlan.snackIdeas?.length) extras.push(`${mealPlan.snackIdeas.length} snack ideas`);
   document.getElementById('planReadyMeta').innerHTML=`
-    ${nights} nights planned${packs>0?` + ${packs} work packs`:''}<br>
-    Estimated total: <strong>$${mealPlan.estimatedTotal.toFixed(2)}</strong><br>
+    ${nights} nights planned${packs>0?` + ${packs} work packs`:''}${extras.length?' · '+extras.join(', '):''}<br>
+    Estimated total: <strong>$${mealPlan.estimatedTotal?.toFixed(2)||'—'}</strong><br>
     ${baby?`New baby foods: <strong>${baby}</strong>`:''}
   `;
 }
