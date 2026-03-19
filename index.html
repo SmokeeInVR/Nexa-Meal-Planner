@@ -548,7 +548,7 @@ const DAY_COLORS = {
 };
 
 // ══ STATE ══
-let apiKey = localStorage.getItem('fmp_key')||'';
+let apiKey = localStorage.getItem('fmp_key')||localStorage.getItem('nexa_key')||localStorage.getItem('nexa_api_key')||localStorage.getItem('nexafit_key')||'';
 let pantryState = {};
 let mealPlan = null;
 let checkedItems = {};
@@ -848,14 +848,14 @@ Include all 7 days in this order: Sunday, Monday, Tuesday, Wednesday, Thursday, 
 Prices must be realistic for US grocery stores. estimatedTotal must not exceed $${weeklyBudget}.`;
 
   try{
-    const resp=await fetch('https://api.anthropic.com/v1/messages',{
+    const resp=await fetch('https://nexa-finance-production.up.railway.app/api/ai/chat',{
       method:'POST',
-      headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:8192,messages:[{role:'user',content:prompt}]})
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({apiKey,system:'You are a family meal planner. Return only valid JSON, no markdown.',messages:[{role:'user',content:prompt}],max_tokens:8192})
     });
     const d=await resp.json();
-    if(!resp.ok) throw new Error(d.error?.message||resp.status);
-    let text=d.content?.[0]?.text||'';
+    if(!resp.ok) throw new Error(d.message||d.error?.message||resp.status);
+    let text=d.content?.[0]?.text||d.text||'';
     const match=text.match(/```(?:json)?\s*([\s\S]*?)```/);
     if(match) text=match[1].trim();
     mealPlan=JSON.parse(text);
@@ -906,14 +906,14 @@ Return ONLY valid JSON (no markdown):
 }`;
 
   try{
-    const resp=await fetch('https://api.anthropic.com/v1/messages',{
+    const resp=await fetch('https://nexa-finance-production.up.railway.app/api/ai/chat',{
       method:'POST',
-      headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:2000,messages:[{role:'user',content:prompt}]})
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({apiKey,system:'You are a meal planner. Return only valid JSON.',messages:[{role:'user',content:prompt}],max_tokens:2000})
     });
     const d=await resp.json();
-    if(!resp.ok) throw new Error(d.error?.message||resp.status);
-    let text=d.content?.[0]?.text||'';
+    if(!resp.ok) throw new Error(d.message||d.error?.message||resp.status);
+    let text=d.content?.[0]?.text||d.text||'';
     const match=text.match(/```(?:json)?\s*([\s\S]*?)```/);
     if(match) text=match[1].trim();
     const newMeal=JSON.parse(text);
