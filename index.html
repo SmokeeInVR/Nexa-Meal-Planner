@@ -330,12 +330,16 @@ input:checked + .toggle-slider2::before { transform:translateX(18px); }
 <div class="app">
   <div class="header">
     <div class="header-title">🍽 Family Meal Planner</div>
-    <div class="wall-toggle">
-      <span class="wall-label">Wall</span>
-      <label class="toggle-switch">
-        <input type="checkbox" id="wallToggle" onchange="toggleWallMode()">
-        <span class="toggle-slider"></span>
-      </label>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <button onclick="syncToCloud().then(()=>{ const b=document.getElementById('mpSaveBtn'); b.textContent='☁ Saved ✓'; setTimeout(()=>b.textContent='☁ Save',2000); })" id="mpSaveBtn" style="background:none;border:1px solid rgba(212,165,62,0.35);border-radius:6px;padding:5px 10px;color:#b8860b;font-size:11px;cursor:pointer;font-family:inherit;">☁ Save</button>
+      <button onclick="loadFromCloud().then(r=>{ if(r){renderPantry();renderShopping();renderRecipes();renderPlanReady();alert('Synced ✅');}else{alert('No cloud data yet — Save first');} })" style="background:none;border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:5px 10px;color:#888;font-size:11px;cursor:pointer;font-family:inherit;">⬇ Sync</button>
+      <div class="wall-toggle">
+        <span class="wall-label">Wall</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="wallToggle" onchange="toggleWallMode()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
     </div>
   </div>
 
