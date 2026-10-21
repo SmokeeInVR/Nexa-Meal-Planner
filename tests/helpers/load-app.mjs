@@ -8,12 +8,12 @@ if (!script) throw new Error('inline application script must be present');
 
 // Drop the boot lines so each test controls init(), then expose module-level state.
 const appScript = script.replace(/\ninit\(\);\nif\(mealPlan\) renderPlanReady\(\);\s*$/, '').concat(`
-this.__state = () => ({ pantryItems, mealPlan, checkedItems, mealHistory, pendingProposal, acceptUndo, mealTypes, actions, putAwayDraft, cookDraft, ateDraft, recipes, weekPicks, cookModeState, recipeView });
+this.__state = () => ({ pantryItems, mealPlan, checkedItems, mealHistory, pendingProposal, acceptUndo, mealTypes, actions, putAwayDraft, cookDraft, ateDraft, recipes, weekPicks, cookModeState, recipeView, hub, hubReady, weeklyBudget });
 this.__set = (key, value) => { if (key === 'exclusions') exclusions = value; if (key === 'otherExcl') otherExcl = value; };`);
 
 const sourceIds = new Set([...html.matchAll(/\bid=["']([^"']+)["']/g)].map(match => match[1]));
 
-export function createApp(storage = {}) {
+export function createApp(storage = {}, { fetch } = {}) {
   const elements = new Map([...sourceIds].map(id => [id, {
     id, innerHTML: '', textContent: '', value: '', checked: false,
     style: {}, disabled: false, classList: { add() {}, remove() {}, toggle() {} },
@@ -36,6 +36,7 @@ export function createApp(storage = {}) {
     document, localStorage, navigator: {},
     setTimeout: () => 0, clearTimeout: () => {}, clearInterval: () => {}, setInterval: () => 0,
   };
+  if (fetch) app.fetch = fetch;
   vm.runInNewContext(appScript, app);
   return { app, storage, el: id => document.getElementById(id) };
 }

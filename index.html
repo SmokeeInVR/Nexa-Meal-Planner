@@ -251,6 +251,14 @@ details.prefs[open] .chev { transform:rotate(180deg); }
 .field-area { resize:vertical; line-height:1.45; }
 .nutrition-fields summary { cursor:pointer; color:var(--primary); }
 
+/* PHASE 4A: HOUSEHOLD SYNC */
+.hub-chip { min-height:30px; padding:0 10px; border-radius:15px; border:1px solid var(--border); background:var(--surface2); font:700 11px system-ui,-apple-system,"Segoe UI",sans-serif; color:var(--text-dim); cursor:pointer; white-space:nowrap; }
+.hub-synced { color:#4ade80; border-color:rgba(34,197,94,0.4); }
+.hub-syncing { color:var(--amber); border-color:rgba(212,165,62,0.4); }
+.hub-offline { color:var(--text-dim); }
+.hub-error { color:var(--red); border-color:rgba(239,68,68,0.5); }
+.hub-merge { color:var(--violet); border-color:rgba(167,139,250,0.5); }
+
 /* PHASE 3: COOK MODE */
 .cook-mode { display:none; position:fixed; inset:0; z-index:550; background:#0a0a0a; }
 .cook-mode.open { display:flex; }
@@ -595,12 +603,19 @@ input:checked + .toggle-slider2::before { transform:translateX(18px); }
 </div>
 <div class="cook-mode" id="cookMode" role="dialog" aria-modal="true" aria-label="Cook mode"><div id="cookModeBody"></div></div>
 <input type="file" id="recipePhotoInput" accept="image/*" capture="environment" hidden onchange="photoInputChanged(this)">
+<div class="packet-modal" id="hubSheet" role="dialog" aria-modal="true" aria-labelledby="hubSheetTitle">
+  <div class="packet-sheet">
+    <div class="flex-between"><div class="section-title" id="hubSheetTitle">Household sync</div><button class="reset-btn" onclick="closeHubSheet()">✕ Close</button></div>
+    <div id="hubSheetBody"></div>
+  </div>
+</div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <div class="app">
   <div class="header">
     <div class="header-title">🍽 Family Meal Planner</div>
     <div style="display:flex;align-items:center;gap:8px;">
 
+      <button class="hub-chip" id="hubChip" onclick="openHubSheet()" style="display:none;" aria-label="Household sync status"></button>
       <div class="wall-toggle">
         <span class="wall-label">Wall</span>
         <label class="toggle-switch">
@@ -920,7 +935,7 @@ function nextCookNight(nights, todayIndex){
   }
   return nights.find(open);
 }
-function writeJSON(key,value){ try { localStorage.setItem(key,JSON.stringify(value)); return true; } catch { return false; } }
+function writeJSON(key,value){ try { localStorage.setItem(key,JSON.stringify(value)); hubSoon(); return true; } catch { return false; } }
 function clone(value){ return value==null ? value : JSON.parse(JSON.stringify(value)); }
 function newId(prefix){ return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2,8)}`; }
 function nowISO(){ return new Date().toISOString(); }
@@ -950,17 +965,25 @@ function init(){
   loadState();
   document.getElementById('pantryLocationInput').innerHTML = LOCATIONS.map(l=>`<option value="${l}">${LOCATION_LABELS[l]}</option>`).join('');
   document.getElementById('pantryUnitInput').innerHTML = '<option value="">—</option>'+UNITS.map(u=>`<option value="${u}">${u}</option>`).join('');
+  document.getElementById('cuisineList').innerHTML = CUISINE_STYLES.filter(s=>s!=='Surprise Me').map(s=>`<option value="${s}"></option>`).join('');
+  document.getElementById('monthName').textContent = MONTHS[new Date().getMonth()];
+  renderPantry();
+  renderWeekPicks();
+  refreshPrefsUI();
+  renderShopping();
+  renderRecipes();
+  renderHome();
+  renderHistoryCount();
+  renderPlanStatus();
+  renderProposalPreview();
+  hubReady = hubConnect();
+}
+// Puts the saved settings back into the Plan screen controls (on load, and after another phone changes them).
+function refreshPrefsUI(){
   document.getElementById('includeBreakfast').checked = mealTypes.breakfast;
   document.getElementById('includeLunch').checked = mealTypes.lunch;
   document.getElementById('includeSnacks').checked = mealTypes.snacks;
   document.getElementById('lightBreakfast').checked = mealTypes.lightBreakfast;
-  document.getElementById('cuisineList').innerHTML = CUISINE_STYLES.filter(s=>s!=='Surprise Me').map(s=>`<option value="${s}"></option>`).join('');
-  renderPantry();
-  renderWeekPicks();
-  renderPrefsSummary();
-  renderExclusionChips();
-  renderCuisineChips();
-  document.getElementById('monthName').textContent = MONTHS[new Date().getMonth()];
   document.getElementById('budgetSlider').value = weeklyBudget;
   document.getElementById('budgetDisplay').textContent = weeklyBudget;
   document.getElementById('srvDisplay').textContent = servings;
@@ -969,13 +992,10 @@ function init(){
   document.getElementById('seasonalToggle').checked = seasonalMode;
   document.getElementById('workPackToggle').checked = workPacks;
   document.getElementById('otherExclusion').value = otherExcl;
+  renderExclusionChips();
+  renderCuisineChips();
+  renderPrefsSummary();
   renderWorkPackNote();
-  renderShopping();
-  renderRecipes();
-  renderHome();
-  renderHistoryCount();
-  renderPlanStatus();
-  renderProposalPreview();
 }
 
 function loadState(){
@@ -1010,6 +1030,7 @@ function savePref(){
   localStorage.setItem('fmp_seasonal',seasonalMode);
   localStorage.setItem('fmp_workpacks',workPacks);
   renderPrefsSummary();
+  hubSoon();
 }
 function renderPrefsSummary(){
   const avoid=[...exclusions,...safeString(otherExcl).split(/[,;]/).map(s=>s.trim())].filter(Boolean);
@@ -1146,7 +1167,7 @@ function saveMealFeedback(day){
   const meal=String(dinnerFor(planNights().find(item=>item?.day===day)).name||''); if(!meal) return;
   const rating=document.getElementById(`feedback-rating-${day}`).value; const note=document.getElementById(`feedback-note-${day}`).value.trim();
   if(!rating){ delete mealFeedback[meal]; } else { mealFeedback[meal]={rating,note}; }
-  localStorage.setItem('fmp_feedback',JSON.stringify(mealFeedback)); renderRecipes(); renderHome();
+  writeJSON('fmp_feedback',mealFeedback); renderRecipes(); renderHome();
 }
 
 // ══ PANTRY ══
@@ -1757,7 +1778,7 @@ function renderPlanStatus(){
 function toggleCheck(cat, name){
   if(!checkedItems[cat]) checkedItems[cat]={};
   checkedItems[cat][name]=!checkedItems[cat][name];
-  localStorage.setItem('fmp_checked',JSON.stringify(checkedItems));
+  writeJSON('fmp_checked',checkedItems);
   renderShopping(); renderHome();
 }
 function toggleCheckByIndex(catIndex,itemIndex){
@@ -1779,7 +1800,7 @@ function groceryEntries(){
 
 function resetShopping(){
   if(!Object.values(checkedItems).some(cat=>isRecord(cat)&&Object.values(cat).some(Boolean))) return;
-  shoppingUndo=clone(checkedItems); checkedItems={}; localStorage.removeItem('fmp_checked');
+  shoppingUndo=clone(checkedItems); checkedItems={}; writeJSON('fmp_checked',checkedItems);
   renderShopping(); renderHome(); showToast('Unchecked everything','undoResetShopping()');
 }
 function undoResetShopping(){
@@ -2262,7 +2283,8 @@ function normalizeRecipe(raw){
     steps:stringList(raw.steps).map(line=>line.slice(0,600)).slice(0,40),
     videoUrl:safeVideoUrl(raw.videoUrl), notes:safeString(raw.notes).slice(0,1000),
     favorite:raw.favorite===true, source:raw.source==='nexa'?'nexa':'ours', nutrition:normalizeNutrition(raw.nutrition),
-    hasPhoto:raw.hasPhoto===true, quick:raw.quick===true, deleted:raw.deleted===true,
+    hasPhoto:raw.hasPhoto===true, photoVersion:Number.isInteger(raw.photoVersion)&&raw.photoVersion>0?raw.photoVersion:0,
+    quick:raw.quick===true, deleted:raw.deleted===true,
     createdAt:safeString(raw.createdAt)||nowISO(), updatedAt:safeString(raw.updatedAt)||nowISO(),
   };
 }
@@ -2409,6 +2431,9 @@ async function attachRecipePhoto(id,file){
     await photoStore('readwrite',store=>store.put(blob,id));
     if(photoURLs[id]) URL.revokeObjectURL(photoURLs[id]);
     photoURLs[id]=URL.createObjectURL(blob);
+    // A new photo version tells the other phone to fetch it, and this phone that it holds the newest copy.
+    recipe.photoVersion=(recipe.photoVersion||0)+1; photoMissing.delete(id);
+    const localPhotos=readJSON('fmp_photo_local',{})||{}; localPhotos[id]=recipe.photoVersion; writeJSON('fmp_photo_local',localPhotos);
     recipe.hasPhoto=true; recipe.updatedAt=nowISO(); persistRecipes(); renderRecipes();
     if(recipeSheetState?.id===id) renderRecipeSheet();
     showToast('Photo added — it stays on this phone for now');
@@ -2419,11 +2444,13 @@ async function attachRecipePhoto(id,file){
   }
 }
 function loadRecipePhoto(id){
-  if(photoURLs[id]||photoLoading.has(id)||typeof indexedDB==='undefined') return;
+  if(photoURLs[id]||photoLoading.has(id)||photoMissing.has(id)||typeof indexedDB==='undefined') return;
   photoLoading.add(id);
   photoStore('readonly',store=>store.get(id)).then(blob=>{
     const recipe=findRecipe(id);
     if(blob) photoURLs[id]=URL.createObjectURL(blob);
+    // With the hub, a missing photo is just not downloaded yet; on its own, the phone has lost it.
+    else if(hub.household){ photoMissing.add(id); hubSyncPhotos(); }
     else if(recipe){ recipe.hasPhoto=false; writeJSON('fmp_recipes',recipes); }
     renderRecipes(); renderWeekPicks(); if(recipeSheetState?.id===id) renderRecipeSheet();
   }).catch(()=>{}).finally(()=>photoLoading.delete(id));
@@ -3042,6 +3069,320 @@ function renderWallPantry(){
       <div class="wall-pantry-dot" style="background:${dotColor[item.state]};"></div>
       <span>${escapeHTML(displayName(item.name))}</span>
     </div>`).join(''):'<span class="wall-pantry-item">Nothing confirmed yet</span>');
+}
+
+// ══ HOME HUB SYNC ══
+// When the household hub serves this app, changes sync through its own /api/ paths. Anywhere else
+// (Vercel, a saved file) there is no hub and the app stays on this phone only, exactly as before.
+// Sync compares each record with what was last synced, so normal edits need no extra bookkeeping.
+const HUB_INTERVAL_MS = 30000;
+const HUB_BACKUP_KEYS = ['fmp_pantry_v2','fmp_recipes','fmp_plan','fmp_checked','fmp_history','fmp_week_picks','fmp_feedback','fmp_actions','fmp_undo_accept','fmp_excl','fmp_other','fmp_cuisine','fmp_budget','fmp_servings','fmp_seasonal','fmp_workpacks','fmp_mealtypes'];
+const HUB_TYPE_LABELS = {plan:'the week plan',checked:'grocery check-offs',history:'plan history',picks:'week picks',feedback:'meal feedback',prefs:'settings',planUndo:'plan undo'};
+let hub = {state:'off',member:null,members:[],household:null,cursor:0,lastSyncAt:null,message:'',pendingMerge:null};
+let hubShadow = {records:{},actions:{}};
+let hubReady = null;
+let hubBusy = false;
+let hubApplying = false;
+let hubTimer = null;
+let hubSoonTimer = null;
+let hubReplaced = [];
+const photoMissing = new Set();
+
+function hubRequest(path,options={}){
+  if(typeof path!=='string'||!/^\/api\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*$/.test(path)) return Promise.reject(new Error('Only the household hub can be contacted.'));
+  if(typeof fetch!=='function') return Promise.reject(new Error('No household hub here.'));
+  return fetch(path,{credentials:'same-origin',cache:'no-store',...options});
+}
+function hubPost(body){ return hubRequest('/api/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }
+function hubPrefsDoc(){ return {exclusions,otherExcl,cuisineStyle,weeklyBudget,servings,seasonalMode,workPacks,mealTypes}; }
+function hubDocFor(key){
+  const split=key.indexOf(':'), type=key.slice(0,split), id=key.slice(split+1);
+  if(type==='pantry') return pantryItems.find(item=>item.id===id);
+  if(type==='recipe') return recipes.find(recipe=>recipe.id===id);
+  return {plan:mealPlan,checked:checkedItems,history:mealHistory,picks:weekPicks,feedback:mealFeedback,prefs:hubPrefsDoc(),planUndo:acceptUndo}[type]??null;
+}
+function hubLocalDocs(){
+  const docs=new Map();
+  pantryItems.forEach(item=>docs.set(`pantry:${item.id}`,item));
+  recipes.forEach(recipe=>docs.set(`recipe:${recipe.id}`,recipe));
+  ['plan:active','checked:active','history:all','picks:current','feedback:all','prefs:household','planUndo:active'].forEach(key=>docs.set(key,hubDocFor(key)));
+  return docs;
+}
+function hubHash(value){ return hashString(canonical(value??null)); }
+function hubPayload(){
+  const docs=hubLocalDocs(); const records=[]; const sent={records:{},actions:{}};
+  docs.forEach((doc,key)=>{
+    const hash=hubHash(doc); const seen=hubShadow.records[key];
+    if(seen&&seen.h===hash) return;
+    const split=key.indexOf(':');
+    records.push({type:key.slice(0,split),id:key.slice(split+1),data:doc??null,deleted:false,baseVersion:seen?.v||0});
+    sent.records[key]=hash;
+  });
+  Object.entries(hubShadow.records).forEach(([key,seen])=>{
+    if(docs.has(key)||seen.deleted) return;
+    const split=key.indexOf(':');
+    records.push({type:key.slice(0,split),id:key.slice(split+1),data:null,deleted:true,baseVersion:seen.v});
+    sent.records[key]='deleted';
+  });
+  const actionList=[];
+  actions.forEach(action=>{
+    const hash=hubHash(action); if(hubShadow.actions[action.id]===hash) return;
+    actionList.push({id:action.id,key:action.key,data:action,undoneAt:action.undoneAt,touches:action.changes.map(change=>change.itemId)});
+    sent.actions[action.id]=hash;
+  });
+  return {body:{cursor:hub.cursor,records,actions:actionList},sent};
+}
+function applyHubPrefs(prefs){
+  if(!isRecord(prefs)) return;
+  exclusions=Array.isArray(prefs.exclusions)?prefs.exclusions.filter(value=>typeof value==='string'):[];
+  otherExcl=safeString(prefs.otherExcl);
+  cuisineStyle=CUISINE_STYLES.includes(prefs.cuisineStyle)?prefs.cuisineStyle:null;
+  const budget=Number(prefs.weeklyBudget); if(Number.isFinite(budget)&&budget>0) weeklyBudget=budget;
+  if(Number.isInteger(prefs.servings)&&prefs.servings>=1&&prefs.servings<=6) servings=prefs.servings;
+  seasonalMode=prefs.seasonalMode===true; workPacks=prefs.workPacks===true;
+  mealTypes={...MEAL_TYPE_DEFAULTS}; if(isRecord(prefs.mealTypes)) Object.keys(MEAL_TYPE_DEFAULTS).forEach(key=>{ if(typeof prefs.mealTypes[key]==='boolean') mealTypes[key]=prefs.mealTypes[key]; });
+}
+function applyHubRecord(record){
+  const key=`${record.type}:${record.id}`; const data=record.deleted?null:record.data;
+  const upsert=(list,item)=>{ const index=list.findIndex(entry=>entry.id===record.id); if(item){ if(index>=0) list[index]=item; else list.push(item); } else if(index>=0) list.splice(index,1); };
+  switch(record.type){
+    case 'pantry': upsert(pantryItems,isRecord(data)?normalizePantryItem({...data,id:record.id}):null); break;
+    case 'recipe': upsert(recipes,isRecord(data)?normalizeRecipe({...data,id:record.id}):null); break;
+    case 'plan': mealPlan=isRecord(data)?data:null; break;
+    case 'checked': checkedItems=isRecord(data)?data:{}; break;
+    case 'history': mealHistory=Array.isArray(data)?data.filter(isRecord):[]; break;
+    case 'picks': weekPicks=normalizeWeekPicks(data); break;
+    case 'feedback': mealFeedback={}; if(isRecord(data)) Object.entries(data).forEach(([meal,value])=>{ mealFeedback[meal]=normalizeFeedback(value); }); break;
+    case 'prefs': applyHubPrefs(data); break;
+    case 'planUndo': acceptUndo=isRecord(data)&&typeof data.acceptedFingerprint==='string'?data:null; break;
+    default: return;
+  }
+  const doc=hubDocFor(key);
+  hubShadow.records[key]=doc===undefined ? {v:record.version,h:'deleted',deleted:true} : {v:record.version,h:hubHash(doc)};
+}
+function applyHubAction(raw){
+  const action=normalizeAction(raw); if(!action) return;
+  const index=actions.findIndex(entry=>entry.id===action.id);
+  if(index>=0) actions[index]=action; else actions.push(action);
+  hubShadow.actions[action.id]=hubHash(action);
+}
+// Writes every synced piece back to this phone's storage and redraws.
+function hubPersistAll(){
+  hubApplying=true;
+  try {
+    actions.sort((a,b)=>b.at.localeCompare(a.at));
+    writeJSON(PANTRY_KEY,{version:2,items:pantryItems}); writeJSON('fmp_recipes',recipes); writeJSON('fmp_actions',actions);
+    if(mealPlan) writeJSON('fmp_plan',mealPlan); else localStorage.removeItem('fmp_plan');
+    writeJSON('fmp_checked',checkedItems); writeJSON('fmp_history',mealHistory); writeJSON('fmp_feedback',mealFeedback);
+    if(weekPicks) writeJSON('fmp_week_picks',weekPicks); else localStorage.removeItem('fmp_week_picks');
+    if(acceptUndo) writeJSON('fmp_undo_accept',acceptUndo); else localStorage.removeItem('fmp_undo_accept');
+    writeJSON('fmp_mealtypes',mealTypes); savePref();
+    writeJSON('fmp_hub_shadow',hubShadow); writeJSON('fmp_hub_cursor',hub.cursor);
+    if(hub.household) localStorage.setItem('fmp_hub_household',hub.household);
+  } finally { hubApplying=false; }
+  refreshPrefsUI(); renderAfterAction(); renderWeekPicks(); renderPlanStatus(); renderPlanReady(); renderHistoryCount();
+}
+function hubItemLabel(entry){
+  const name=entry.previous?.name||hubDocFor(`${entry.type}:${entry.id}`)?.name;
+  return name ? displayName(name) : HUB_TYPE_LABELS[entry.type]||'an item';
+}
+function hubApplyResponse(data,sent){
+  const rejected=Array.isArray(data.rejectedActions)?data.rejectedActions:[];
+  (data.applied||[]).forEach(({type,id,version})=>{
+    const key=`${type}:${id}`; const hash=sent.records[key];
+    hubShadow.records[key]=hash==='deleted' ? {v:version,h:'deleted',deleted:true} : {v:version,h:hash};
+  });
+  Object.entries(sent.actions).forEach(([id,hash])=>{ if(!rejected.some(entry=>entry.id===id)) hubShadow.actions[id]=hash; });
+  // Someone else already logged the same thing: drop ours; the hub sends back the pantry as it has it.
+  rejected.forEach(entry=>{ actions=actions.filter(action=>action.id!==entry.id); delete hubShadow.actions[entry.id]; });
+  const incoming=data.changes||{records:[],actions:[]};
+  incoming.records.forEach(applyHubRecord);
+  incoming.actions.forEach(applyHubAction);
+  hub.cursor=Number(data.cursor)||hub.cursor;
+  hubReplaced=Array.isArray(data.replaced)?data.replaced:[];
+  hubPersistAll();
+  const notes=[]; let undo=null;
+  rejected.forEach(entry=>notes.push(`${entry.by} already logged “${entry.label||'that'}” — kept theirs.`));
+  if(hubReplaced.length){ notes.push(`${hubReplaced[0].by} had changed ${hubReplaced.map(hubItemLabel).join(', ')} before you — your change was kept.`); undo='hubUndoReplace()'; }
+  const others=new Map();
+  [...incoming.records,...incoming.actions].forEach(entry=>{ const by=entry.updatedBy||entry.createdBy; if(by&&by!==hub.member?.name) others.set(by,(others.get(by)||0)+1); });
+  others.forEach((count,by)=>notes.push(`${by} updated ${count} thing${count===1?'':'s'}.`));
+  if(notes.length) showToast(notes.join(' '),undo);
+}
+// Puts back what the other person had, as a normal change that syncs next time.
+function hubUndoReplace(){
+  if(!hubReplaced.length) return false;
+  hubReplaced.forEach(entry=>applyHubRecord({type:entry.type,id:entry.id,data:entry.previous,deleted:entry.previousDeleted,version:hubShadow.records[`${entry.type}:${entry.id}`]?.v||0}));
+  hubReplaced.forEach(entry=>{ const key=`${entry.type}:${entry.id}`; if(hubShadow.records[key]) hubShadow.records[key].h='changed'; });
+  hubReplaced=[];
+  hubPersistAll(); hubSoon(); showToast('Put back their change');
+  return true;
+}
+function hubSetState(state,message=''){ hub.state=state; hub.message=message; renderHubChip(); if(document.getElementById('hubSheet').classList.contains?.('open')) renderHubSheet(); }
+function hubSoon(){
+  if(hubApplying||!hub.household||hub.pendingMerge) return;
+  if(hubSoonTimer) clearTimeout(hubSoonTimer);
+  hubSoonTimer=setTimeout(()=>{ const {body}=hubPayload(); if(body.records.length||body.actions.length) hubSync(); },1500);
+}
+function hubStartLoop(){
+  if(hubTimer) clearInterval(hubTimer);
+  hubTimer=setInterval(()=>{ if(document.visibilityState!=='hidden') hubSync(); },HUB_INTERVAL_MS);
+}
+if(typeof document.addEventListener==='function') document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'&&hub.household) hubSync(); });
+async function hubSync(){
+  if(!hub.household) return hub.state;
+  if(hub.pendingMerge||hubBusy) return hub.state;
+  hubBusy=true; hubSetState('syncing');
+  try {
+    const {body,sent}=hubPayload();
+    const res=await hubPost(body);
+    if(res.status===401||res.status===403){ hubSetState('error','Signed out of the household. Reload the page to sign in again.'); return hub.state; }
+    if(!res.ok) throw new Error(`hub answered ${res.status}`);
+    hubApplyResponse(await res.json(),sent);
+    hub.lastSyncAt=nowISO(); hubSetState('synced');
+    hubSyncPhotos();
+  } catch {
+    hubSetState('offline',"Can't reach the household hub right now. Changes stay on this phone and sync when it's back.");
+  } finally { hubBusy=false; }
+  return hub.state;
+}
+function hubRefresh(){ return hubSync(); }
+function hubLocalIsEmpty(){ return !activePantryItems().length&&!liveRecipes().length&&!planNights().length&&!actions.length; }
+// reset: start from the household's copy alone (download or merge); without it, this phone's data is kept to upload.
+function hubAdopt(full,{reset}={}){
+  hubShadow={records:{},actions:{}};
+  if(reset){ pantryItems=[]; recipes=[]; mealPlan=null; checkedItems={}; mealHistory=[]; weekPicks=null; mealFeedback={}; acceptUndo=null; actions=[]; }
+  full.changes.records.forEach(applyHubRecord); full.changes.actions.forEach(applyHubAction);
+  hub.cursor=Number(full.cursor)||0;
+}
+async function hubConnect(){
+  let session;
+  try {
+    const res=await hubRequest('/api/session');
+    const json=(res.headers.get('content-type')||'').includes('application/json');
+    if(json&&(res.status===401||res.status===403)){ hubSetState('error',"This phone isn't signed in to the household. Reload the page to sign in."); return hub.state; }
+    if(!res.ok||!json){ hubSetState('off'); return hub.state; }
+    session=await res.json();
+  } catch { hubSetState('off'); return hub.state; }
+  hub.member=session.member; hub.members=Array.isArray(session.members)?session.members:[]; hub.household=session.household?.id||null;
+  if(!hub.household){ hubSetState('error','The hub did not say which household this is.'); return hub.state; }
+  if(localStorage.getItem('fmp_hub_household')===hub.household){
+    const shadow=readJSON('fmp_hub_shadow',null);
+    hubShadow={records:isRecord(shadow?.records)?shadow.records:{},actions:isRecord(shadow?.actions)?shadow.actions:{}};
+    hub.cursor=Number(readJSON('fmp_hub_cursor',0))||0;
+    hubStartLoop();
+    return hubSync();
+  }
+  // First time this phone meets this household: look before mixing anything.
+  let full;
+  try { const res=await hubPost({cursor:0,records:[],actions:[]}); if(!res.ok) throw new Error(); full=await res.json(); }
+  catch { hub.household=null; hubSetState('offline',"Can't reach the household hub right now. This phone keeps working on its own."); return hub.state; }
+  const hubEmpty=!full.changes.records.length&&!full.changes.actions.length;
+  if(hubEmpty||hubLocalIsEmpty()){
+    hubAdopt(full,{reset:!hubEmpty}); hubPersistAll(); hubStartLoop();
+    showToast(hubEmpty?"This phone's data is now the household's.":"Loaded the household's meals.");
+    return hubSync();
+  }
+  hub.pendingMerge=full; hubSetState('merge'); openHubSheet();
+  return 'merge';
+}
+function hubBackupLocal(){
+  const data={}; HUB_BACKUP_KEYS.forEach(key=>{ const value=localStorage.getItem(key); if(value!==null) data[key]=value; });
+  return writeJSON('fmp_hub_premerge_backup',{at:nowISO(),data});
+}
+// Household data comes first (already synced); this phone's extras are added on top and sync as new changes.
+function hubMergeLocal(local){
+  local.pantry.forEach(item=>{
+    if(pantryItems.some(entry=>entry.id===item.id)) return;
+    if(item.kind==='leftover'){ pantryItems.push(item); return; }
+    const twin=pantryItems.find(entry=>entry.kind!=='leftover'&&!entry.archived&&entry.name.toLowerCase()===item.name.toLowerCase());
+    if(!twin){ if(!item.archived) pantryItems.push(item); return; }
+    if((item.lastConfirmedAt||'')>(twin.lastConfirmedAt||'')) Object.assign(twin,{...item,id:twin.id,name:twin.name});
+  });
+  local.recipes.filter(recipe=>!recipe.deleted).forEach(recipe=>{
+    if(recipes.some(entry=>entry.id===recipe.id)) return;
+    const twin=liveRecipes().find(entry=>entry.name.toLowerCase()===recipe.name.toLowerCase());
+    if(!twin){ recipes.push(recipe); return; }
+    if(recipe.favorite) twin.favorite=true;
+  });
+  if(!mealPlan&&local.plan){ mealPlan=local.plan; checkedItems=local.checked||{}; }
+  else if(Array.isArray(local.plan?.weeklyMealPlan)&&local.plan.weeklyMealPlan.length&&local.plan.meta?.fingerprint!==mealPlan?.meta?.fingerprint){
+    mealHistory=[historyEntry(local.plan,newId('h'),nowISO()),...mealHistory];
+  }
+  local.history.forEach(entry=>{ if(!mealHistory.some(existing=>existing.id===entry.id)) mealHistory.push(entry); });
+  mealHistory=mealHistory.slice(0,HISTORY_LIMIT);
+  if(!weekPicks&&local.picks) weekPicks=local.picks;
+  Object.entries(local.feedback||{}).forEach(([meal,value])=>{ if(!mealFeedback[meal]) mealFeedback[meal]=value; });
+  if(!hubShadow.records['prefs:household']) applyHubPrefs(local.prefs);
+  const liveKeys=new Set(actions.filter(action=>!action.undoneAt).map(action=>action.key));
+  local.actions.forEach(action=>{ if(actions.some(entry=>entry.id===action.id)||(!action.undoneAt&&liveKeys.has(action.key))) return; actions.push(action); });
+}
+async function hubMergeChoice(choice){
+  const full=hub.pendingMerge; if(!full) return 'none';
+  if(!hubBackupLocal()){ hubSetState('error','Could not back up this phone first, so nothing changed.'); return 'error'; }
+  const local={pantry:clone(pantryItems),recipes:clone(recipes),plan:clone(mealPlan),checked:clone(checkedItems),history:clone(mealHistory),
+    picks:clone(weekPicks),feedback:clone(mealFeedback),prefs:clone(hubPrefsDoc()),actions:clone(actions)};
+  hub.pendingMerge=null;
+  hubAdopt(full,{reset:true});
+  if(choice==='merge') hubMergeLocal(local);
+  hubPersistAll(); closeHubSheet(); hubStartLoop();
+  showToast(choice==='merge'?'Merged this phone into the household.':"Using the household's data. This phone's old data is backed up.");
+  await hubSync();
+  return 'merged';
+}
+// Photos: upload ours, download the other phone's, delete removed ones. photoVersion says which is newest.
+async function hubSyncPhotos(){
+  if(typeof indexedDB==='undefined'||!hub.household) return;
+  const synced=readJSON('fmp_hub_photos',{})||{}, local=readJSON('fmp_photo_local',{})||{};
+  let redraw=false;
+  for(const recipe of recipes){
+    const version=recipe.photoVersion||0; const route=`/api/photos/${recipe.id}`;
+    try {
+      if(recipe.hasPhoto&&!recipe.deleted){
+        if(local[recipe.id]===version){
+          if(synced[recipe.id]===version) continue;
+          const blob=await photoStore('readonly',store=>store.get(recipe.id));
+          if(blob&&(await hubRequest(route,{method:'PUT',headers:{'Content-Type':blob.type||'image/jpeg'},body:blob})).ok) synced[recipe.id]=version;
+        } else {
+          const res=await hubRequest(route); if(!res.ok) continue;
+          const blob=await res.blob();
+          await photoStore('readwrite',store=>store.put(blob,recipe.id));
+          if(photoURLs[recipe.id]) URL.revokeObjectURL(photoURLs[recipe.id]);
+          photoURLs[recipe.id]=URL.createObjectURL(blob); photoMissing.delete(recipe.id);
+          local[recipe.id]=version; synced[recipe.id]=version; redraw=true;
+        }
+      } else if(synced[recipe.id]!==undefined&&(await hubRequest(route,{method:'DELETE'})).ok) delete synced[recipe.id];
+    } catch {}
+  }
+  hubApplying=true; try { writeJSON('fmp_hub_photos',synced); writeJSON('fmp_photo_local',local); } finally { hubApplying=false; }
+  if(redraw){ renderRecipes(); renderWeekPicks(); if(recipeSheetState) renderRecipeSheet(); }
+}
+function renderHubChip(){
+  const chip=document.getElementById('hubChip');
+  const labels={synced:'● Synced',syncing:'↻ Syncing',offline:'○ Offline',error:'⚠ Sign in',merge:'⚑ Needs you'};
+  chip.style.display=hub.state==='off'?'none':'';
+  chip.className=`hub-chip hub-${hub.state}`;
+  chip.innerHTML=labels[hub.state]||'';
+}
+function openHubSheet(){ renderHubSheet(); document.getElementById('hubSheet').classList.add('open'); }
+function closeHubSheet(){ document.getElementById('hubSheet').classList.remove('open'); }
+function renderHubSheet(){
+  const body=document.getElementById('hubSheetBody');
+  if(hub.pendingMerge){
+    const records=hub.pendingMerge.changes.records.filter(record=>!record.deleted&&isRecord(record.data));
+    const count=type=>records.filter(record=>record.type===type&&!record.data.archived&&!record.data.deleted).length;
+    const hubPlan=records.some(record=>record.type==='plan'&&Array.isArray(record.data.weeklyMealPlan)&&record.data.weeklyMealPlan.length);
+    body.innerHTML=statusBox('pending','This phone has its own meals data',`<b>This phone:</b> ${activePantryItems().length} pantry items, ${liveRecipes().length} recipes${planNights().length?', a week plan':''}.<br><b>The household:</b> ${count('pantry')} pantry items, ${count('recipe')} recipes${hubPlan?', a week plan':''}.
+      <div class="status-note">Merging keeps everything: matching pantry items keep the most recently confirmed level, matching recipes keep the household's copy (with your favourites), and a different week plan from this phone goes into History. This phone is backed up first either way.</div>`)
+      +`<button class="gen-btn" onclick="hubMergeChoice('merge')">Merge into the household</button><button class="link-btn" onclick="hubMergeChoice('household')">Use the household's data instead</button>`;
+    return;
+  }
+  const titles={synced:['done','Synced with the household'],syncing:['pending','Syncing…'],offline:['notice','Offline'],error:['error','Not signed in'],off:['notice','This phone only']};
+  const [kind,title]=titles[hub.state]||titles.off;
+  const people=hub.members.map(member=>escapeHTML(member.name)).join(' and ');
+  body.innerHTML=statusBox(kind,title,`${hub.member?`Signed in as <b>${escapeHTML(hub.member.name)}</b>${people?` · household: ${people}`:''}<br>`:''}${hub.lastSyncAt?`Last synced ${escapeHTML(shortTime(hub.lastSyncAt))}.`:''}${hub.message?`<div class="status-note">${escapeHTML(hub.message)}</div>`:''}`)
+    +'<div class="section-hint">Your data lives on the household PC. Photos sync too. Changes sync every 30 seconds while the app is open.</div>'
+    +(hub.household?'<button class="reset-btn wide-btn" onclick="hubRefresh()">Check for changes now</button>':'');
 }
 
 // ══ BOOT ══

@@ -20,8 +20,16 @@ for (const marker of requiredMarkers) assert.ok(html.includes(marker), `Missing 
 assert.ok(!/https?:\/\//i.test(html), 'Phase A index.html must not contain an http(s) URL or external stylesheet');
 assert.ok(!/<link\b[^>]*\brel=["']stylesheet["']/i.test(html), 'Phase A must not load an external stylesheet');
 
+// Phase 4a boundary: the app may talk only to its own household hub. There is exactly one network
+// call site, hubRequest, and it accepts nothing but same-origin /api/ paths.
+const fetchSites = [...html.matchAll(/\bfetch\(/g)].length;
+assert.equal(fetchSites, 1, 'Exactly one network call site (hubRequest) may exist');
+const hubRequestSource = html.match(/function hubRequest\(path,options=\{\}\)\{[\s\S]*?\n\}/)?.[0] || '';
+assert.ok(hubRequestSource.includes('fetch(path,'), 'The only fetch must live in hubRequest');
+assert.ok(hubRequestSource.includes('^\\/api\\/'), 'hubRequest must only allow /api/ paths');
+
 const forbiddenMarkers = [
-  'fetch(', '/api/nexa/chat', '/api/ai/chat', 'SYNC_URL', 'Railway', 'railway',
+  '/api/nexa/chat', '/api/ai/chat', 'SYNC_URL', 'Railway', 'railway',
   'nexa-finance', 'apiKey', 'fmp_key', 'nexa_key', 'keyModal', 'showKeyModal',
   'saveKey', 'clearKey', 'generatePlan', 'swapMeal', 'regenerateGroceryList',
   'fitness', 'Fitness', 'NEXAFIT', 'Quick Swap', 'quickSwap', 'syncToCloud',
