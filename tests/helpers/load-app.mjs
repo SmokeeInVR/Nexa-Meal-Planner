@@ -8,7 +8,7 @@ if (!script) throw new Error('inline application script must be present');
 
 // Drop the boot lines so each test controls init(), then expose module-level state.
 const appScript = script.replace(/\ninit\(\);\nif\(mealPlan\) renderPlanReady\(\);\s*$/, '').concat(`
-this.__state = () => ({ pantryItems, mealPlan, checkedItems, mealHistory, pendingProposal, acceptUndo, mealTypes });
+this.__state = () => ({ pantryItems, mealPlan, checkedItems, mealHistory, pendingProposal, acceptUndo, mealTypes, actions, putAwayDraft, cookDraft, ateDraft });
 this.__set = (key, value) => { if (key === 'exclusions') exclusions = value; if (key === 'otherExcl') otherExcl = value; };`);
 
 const sourceIds = new Set([...html.matchAll(/\bid=["']([^"']+)["']/g)].map(match => match[1]));

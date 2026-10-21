@@ -143,6 +143,31 @@ input:checked + .toggle-slider::before { transform:translateX(16px); }
 .preview-actions { display:flex; gap:10px; align-items:center; margin-top:12px; }
 .preview-actions .gen-btn { flex:1; margin-top:0; }
 
+/* RECONCILIATION */
+.putaway-bar { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px; margin-bottom:14px; border:1px dashed var(--violet); background:var(--violet-bg); border-radius:var(--radius); font-size:13px; color:var(--text); }
+.home-tag { display:inline-block; margin-left:6px; padding:1px 6px; border-radius:4px; font-size:10px; font-weight:700; color:#22c55e; border:1px solid rgba(34,197,94,0.4); text-decoration:none; }
+.night-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:12px; }
+.night-actions .add-btn, .night-actions .reset-btn { min-height:40px; }
+.done-tag { font-size:13px; font-weight:700; color:var(--primary); }
+.recent-row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 0; font-size:13px; border-top:1px solid var(--border); }
+.recent-row:first-of-type { border-top:none; }
+.rec-row { padding:12px 0; border-top:1px solid var(--border); }
+.rec-row.skipped { opacity:0.55; }
+.rec-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+.rec-label { font-size:14px; font-weight:600; color:var(--text); }
+.rec-target { font-size:12px; color:var(--text-dim); margin-top:2px; }
+.rec-result { font-size:12px; color:var(--primary); margin-top:8px; }
+.rec-warn { font-size:12px; color:var(--amber); margin-top:8px; }
+.rec-row .field-row { margin-top:8px; }
+.rec-row select.field-input, .rec-row input.field-input { min-height:40px; padding:8px 10px; }
+.rec-action { width:auto; min-width:120px; }
+.portion-step { display:flex; align-items:center; gap:6px; }
+.portion-step span { min-width:22px; text-align:center; font-weight:700; }
+.pantry-row.leftover { border-left-color:var(--violet); }
+.leftover-badge { margin-left:6px; padding:1px 6px; border-radius:4px; font-size:10px; font-weight:700; color:var(--violet); border:1px solid rgba(167,139,250,0.4); }
+.use-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.use-chips .chip { min-height:34px; }
+
 /* GENERATE */
 .budget-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
 .budget-val { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:22px; font-weight:600; color:var(--primary); }
@@ -403,6 +428,18 @@ input:checked + .toggle-slider2::before { transform:translateX(18px); }
     <button class="link-btn danger" id="pantryArchiveBtn" onclick="archiveFromSheet()">Remove from pantry list</button>
   </div>
 </div>
+<div class="packet-modal" id="putAwaySheet" role="dialog" aria-modal="true" aria-labelledby="putAwayTitle">
+  <div class="packet-sheet">
+    <div class="flex-between"><div class="section-title" id="putAwayTitle">Put away groceries</div><button class="reset-btn" onclick="closePutAway()">✕ Close</button></div>
+    <div id="putAwayBody"></div>
+  </div>
+</div>
+<div class="packet-modal" id="cookSheet" role="dialog" aria-modal="true" aria-labelledby="cookSheetTitle">
+  <div class="packet-sheet">
+    <div class="flex-between"><div class="section-title" id="cookSheetTitle">We cooked this</div><button class="reset-btn" onclick="closeCookSheet()">✕ Close</button></div>
+    <div id="cookSheetBody"></div>
+  </div>
+</div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <div class="app">
   <div class="header">
@@ -635,7 +672,13 @@ const LOCATION_LABELS = {fridge:'Fridge',freezer:'Freezer',pantry:'Pantry',spice
 const LOCATION_SHORT = {fridge:'Fridge',freezer:'Freezer',pantry:'Pantry',spices:'Spices'};
 const LOCATION_ICONS = {fridge:'🧊',freezer:'❄️',pantry:'📦',spices:'🧂'};
 const UNITS = ['count','lb','oz','g','kg','cup','tbsp','tsp','ml','l','gal','can','jar','bag','box','bottle','bunch','pack','dozen'];
-const UNIT_ALIASES = {lbs:'lb',pound:'lb',pounds:'lb',ounce:'oz',ounces:'oz',gram:'g',grams:'g',kgs:'kg',kilogram:'kg',kilograms:'kg',cups:'cup',tablespoon:'tbsp',tablespoons:'tbsp',teaspoon:'tsp',teaspoons:'tsp',liter:'l',liters:'l',litre:'l',litres:'l',gallon:'gal',gallons:'gal',cans:'can',jars:'jar',bags:'bag',boxes:'box',bottles:'bottle',bunches:'bunch',packs:'pack',ct:'count',each:'count'};
+const UNIT_ALIASES = {lbs:'lb',pound:'lb',pounds:'lb',ounce:'oz',ounces:'oz',gram:'g',grams:'g',kgs:'kg',kilogram:'kg',kilograms:'kg',cups:'cup',tablespoon:'tbsp',tablespoons:'tbsp',teaspoon:'tsp',teaspoons:'tsp',liter:'l',liters:'l',litre:'l',litres:'l',gallon:'gal',gallons:'gal',cans:'can',jars:'jar',bags:'bag',boxes:'box',bottles:'bottle',bunches:'bunch',packs:'pack',pkg:'pack',package:'pack',packages:'pack',doz:'dozen',ct:'count',each:'count'};
+// Conversions only within a family; package units (can, bag, …) only match themselves.
+const UNIT_FACTORS = {lb:['mass',453.592],oz:['mass',28.3495],g:['mass',1],kg:['mass',1000],cup:['volume',236.588],tbsp:['volume',14.7868],tsp:['volume',4.92892],ml:['volume',1],l:['volume',1000],gal:['volume',3785.41],count:['count',1],dozen:['count',12]};
+const CATEGORY_LOCATION = {produce:'fridge',protein:'fridge',dairy:'fridge',frozen:'freezer',pantry:'pantry',seasonings:'spices'};
+const ACTION_KINDS = ['putaway','cooked','ate','skipped'];
+const ACTION_LIMIT = 50;
+const UNDO_LIMIT = 10;
 const STALE_DAYS = 7;
 const DAY_MS = 24*60*60*1000;
 const HISTORY_LIMIT = 12;
@@ -678,6 +721,10 @@ let mealTypes = {...MEAL_TYPE_DEFAULTS};
 let pendingProposal = null;
 let acceptUndo = null;
 let planStatusMessage = null;
+let actions = [];
+let putAwayDraft = null;
+let cookDraft = null;
+let ateDraft = null;
 let mealPlan = null;
 let checkedItems = {};
 let exclusions = [];
@@ -711,12 +758,13 @@ function safeHistoryDate(value){
 function planNights(){ return Array.isArray(mealPlan?.weeklyMealPlan) ? mealPlan.weeklyMealPlan.filter(isRecord) : []; }
 function dinnerFor(dayPlan){ return isRecord(dayPlan?.dinner) ? dayPlan.dinner : {}; }
 function nextCookNight(nights, todayIndex){
+  const open=night=>night&&!night.isLeftoverNight&&!nightAction(night.day,['cooked','skipped']);
   for(let offset=1;offset<=7;offset++){
     const day=DAYS[(todayIndex+offset)%7];
     const night=nights.find(item=>item?.day===day);
-    if(night&&!night.isLeftoverNight) return night;
+    if(open(night)) return night;
   }
-  return nights.find(night=>night&&!night.isLeftoverNight);
+  return nights.find(open);
 }
 function writeJSON(key,value){ try { localStorage.setItem(key,JSON.stringify(value)); return true; } catch { return false; } }
 function clone(value){ return value==null ? value : JSON.parse(JSON.stringify(value)); }
@@ -775,6 +823,7 @@ function init(){
 
 function loadState(){
   loadPantry();
+  const storedActions=readJSON('fmp_actions',[]); actions=Array.isArray(storedActions)?storedActions.map(normalizeAction).filter(Boolean):[];
   const storedTypes=readJSON('fmp_mealtypes',{}); mealTypes={...MEAL_TYPE_DEFAULTS};
   if(isRecord(storedTypes)) Object.keys(MEAL_TYPE_DEFAULTS).forEach(key=>{ if(typeof storedTypes[key]==='boolean') mealTypes[key]=storedTypes[key]; });
   const storedUndo=readJSON('fmp_undo_accept',null); acceptUndo=isRecord(storedUndo)&&typeof storedUndo.acceptedFingerprint==='string'?storedUndo:null;
@@ -821,30 +870,40 @@ function planWindow(){
 }
 function openTab(id){ switchTab(id, document.querySelector(`[data-testid="tab-${id}"]`)); }
 function groceryProgress(){
-  if(!mealPlan?.groceryList) return {done:0,total:0,cost:0};
   let done=0,total=0,cost=0;
-  Object.entries(mealPlan.groceryList).forEach(([cat,items])=>(Array.isArray(items)?items:[]).forEach(item=>{ item=isRecord(item)?item:{}; total++; cost+=Number(item.estimatedPrice)||0; if(checkedItems[cat]?.[item.name]) done++; }));
+  groceryEntries().forEach(entry=>{ total++; cost+=Number(entry.item.estimatedPrice)||0; if(checkedItems[entry.cat]?.[entry.key]) done++; });
   return {done,total,cost};
 }
-function renderHome(){
+function renderHome(now=new Date()){
   const c=document.getElementById('homeContent'); if(!c) return;
   const nights=planNights();
-  const pantryCard=pantryHomeCard();
+  const pantryCard=pantryHomeCard(now);
   if(!nights.length){ c.innerHTML=`<div class="empty-state" style="height:auto;"><div class="empty-icon">⌂</div><div class="empty-title">No accepted plan yet</div><div class="empty-sub">NEXA can propose a Wednesday-to-Tuesday plan for Marcel to approve. This dashboard will not send anything.</div><button class="gen-btn" style="max-width:280px;margin-top:20px" onclick="openPlanningPacket()">✦ Plan with NEXA</button><button class="reset-btn" style="margin-top:10px" onclick="openPlanImport()">📥 Paste NEXA's proposal</button></div><div class="home-grid">${pantryCard}</div>`; return; }
-  const todayIndex=new Date().getDay(); const today=DAYS[todayIndex]; const tonight=nights.find(d=>d?.day===today)||nights[0];
-  const nextCook=nextCookNight(nights,todayIndex);
+  const win=mealPlan?.meta?.window; const start=parseISODate(win?.start), end=parseISODate(win?.end);
+  const midnight=new Date(now); midnight.setHours(0,0,0,0);
+  const beforeStart=!!start&&midnight<start, afterEnd=!!end&&midnight>end;
+  const todayIndex=now.getDay(); const today=DAYS[todayIndex];
+  const tonight=beforeStart||afterEnd ? null : nights.find(d=>d?.day===today);
+  const nextCook=beforeStart ? nights.find(n=>!n.isLeftoverNight&&!nightAction(n.day,['cooked','skipped'])) : afterEnd ? null : nextCookNight(nights,todayIndex);
   const shop=groceryProgress(); const pct=shop.total?Math.round(shop.done/shop.total*100):0; const max=Math.round(weeklyBudget*1.15);
-  const accepted=windowLabel(mealPlan?.meta?.window);
+  const notPutAway=pendingPutAwayEntries().length;
+  const accepted=windowLabel(win);
+  let tonightCard;
+  if(beforeStart) tonightCard=`<div class="card"><div class="label-sm">This week</div><div class="home-value">Plan starts ${escapeHTML(shortDate(start))}</div><div class="home-meta">First dinner: ${escapeHTML(dinnerFor(nights[0]).name||'—')}. A good time to shop and put groceries away.</div></div>`;
+  else if(afterEnd) tonightCard=`<div class="card"><div class="label-sm">This week</div><div class="home-value">This plan ended ${escapeHTML(shortDate(end))}</div><div class="home-meta">Plan the next week with NEXA.</div><button class="reset-btn" style="margin-top:10px" onclick="openPlanningPacket()">✦ Plan with NEXA</button></div>`;
+  else if(!tonight) tonightCard=`<div class="card"><div class="label-sm">Tonight's dinner</div><div class="home-value">No dinner planned tonight</div></div>`;
+  else tonightCard=`<div class="card"><div class="label-sm">Tonight's dinner</div><div class="home-value">${escapeHTML(dinnerFor(tonight).name||'No dinner named')}</div><div class="home-meta">${tonight.isLeftoverNight?'Leftovers night — reheat and serve.':'Cook night — make the planned meal.'}</div>${nightActionsHTML(tonight)}</div>`;
   c.innerHTML=`<div class="section-title">Home</div><div class="section-sub">${accepted?`${escapeHTML(accepted)} (Wednesday-to-Tuesday)`:planWindow()} · accepted plan overview</div><div class="home-grid">
-    <div class="card"><div class="label-sm">Tonight's dinner</div><div class="home-value">${escapeHTML(dinnerFor(tonight).name||'No dinner named')}</div><div class="home-meta">${tonight?.isLeftoverNight?'Leftovers night — reheat and serve.':'Cook night — make the planned meal.'}</div></div>
-    <div class="card"><div class="label-sm">Next cooking action</div><div class="home-value">${escapeHTML(nextCook?.day||'—')}: ${escapeHTML(dinnerFor(nextCook).name||'No next cook identified')}</div><div class="home-meta">${nextCook?.isLeftoverNight?'Leftovers':'Cook once, then use the accepted plan as written.'}</div></div>
-    <div class="card"><div class="label-sm">Grocery list progress</div><div class="home-value">${shop.done} of ${shop.total} items checked</div><div class="home-progress"><span style="width:${pct}%"></span></div><div class="home-meta">Estimated list: $${shop.cost.toFixed(2)} · target $${weeklyBudget} · comfortable maximum $${max}</div></div>
+    ${tonightCard}
+    <div class="card"><div class="label-sm">Next cooking action</div><div class="home-value">${nextCook?`${escapeHTML(nextCook.day)}: ${escapeHTML(dinnerFor(nextCook).name||'No dinner named')}`:'No more cook nights in this plan'}</div><div class="home-meta">Cook once, then use the accepted plan as written.</div></div>
+    ${recentActionsCard(now)}
+    <div class="card"><div class="label-sm">Grocery list progress</div><div class="home-value">${shop.done} of ${shop.total} items checked</div><div class="home-progress"><span style="width:${pct}%"></span></div><div class="home-meta">Estimated list: $${shop.cost.toFixed(2)} · target $${weeklyBudget} · comfortable maximum $${max}${notPutAway?`<br>${notPutAway} checked item${notPutAway===1?'':'s'} not put away yet.`:''}</div>${notPutAway?'<button class="reset-btn" style="margin-top:10px" onclick="openPutAway()">Put away groceries</button>':''}</div>
     ${pantryCard}
     <div class="card"><div class="label-sm">Plan status</div><div class="home-value">Review the accepted plan</div><div class="home-meta">${mealPlan?.meta?.acceptedAt?`Accepted ${escapeHTML(safeHistoryDate(mealPlan.meta.acceptedAt))}. `:''}Feedback is recorded locally and never changes or swaps meals automatically.</div></div>
   </div>`;
 }
-function pantryHomeCard(){
-  const items=activePantryItems(); const now=new Date();
+function pantryHomeCard(now=new Date()){
+  const items=activeFoodItems();
   const inStock=items.filter(isConfirmedStock).length;
   const check=items.filter(i=>needsCheck(i,now)).length;
   const value=items.length?`${inStock} in stock · ${check} need${check===1?'s':''} a check`:'Nothing tracked yet';
@@ -852,8 +911,14 @@ function pantryHomeCard(){
   return `<div class="card"><div class="label-sm">Pantry</div><div class="home-value">${value}</div><div class="home-meta">${meta}</div><button class="reset-btn" style="margin-top:10px" onclick="openTab('pantry')">Open pantry</button></div>`;
 }
 function pantryPacketSection(now){
-  const items=activePantryItems();
-  if(!items.length) return 'Pantry: nothing recorded yet. Assume nothing is at home unless Marcel confirms it.';
+  const items=activeFoodItems(); const leftovers=activeLeftovers();
+  if(!items.length&&!leftovers.length) return 'Pantry: nothing recorded yet. Assume nothing is at home unless Marcel confirms it.';
+  const leftoverLines=leftovers.map(item=>{
+    const bits=[`${item.portions} portion${item.portions===1?'':'s'}`];
+    const cooked=parseISODate(item.cookedOn); if(cooked) bits.push(`cooked ${cooked.toLocaleDateString([],{month:'short',day:'numeric'})}`);
+    const best=bestByText(item.bestBy); if(best) bits.push(best);
+    return `${item.name} (${bits.join(', ')})`;
+  }).join('; ')||'none';
   const describe=item=>{
     const bits=[]; const qty=qtyText(item.qty); if(qty) bits.push(qty);
     bits.push(LOCATION_SHORT[item.location].toLowerCase());
@@ -868,6 +933,7 @@ function pantryPacketSection(now){
     `Pantry — low: ${byState('low')}`,
     `Pantry — out: ${byState('out')}`,
     `Pantry — unknown, not checked (do not assume these are at home): ${byState('unknown')}`,
+    `Cooked leftovers: ${leftoverLines}`,
     `(“Stale” means last confirmed more than ${STALE_DAYS} days ago.)`,
   ].join('\n');
 }
@@ -952,13 +1018,22 @@ function normalizePantryItem(raw){
   const name=safeString(raw.name).trim().slice(0,60); if(!name) return null;
   const state=PANTRY_STATES.includes(raw.state) ? raw.state : 'unknown';
   const confirmed=typeof raw.lastConfirmedAt==='string'&&!Number.isNaN(Date.parse(raw.lastConfirmedAt)) ? raw.lastConfirmedAt : null;
-  return {
+  const item={
     id:typeof raw.id==='string'&&/^[A-Za-z0-9_-]{1,40}$/.test(raw.id) ? raw.id : newId('p'),
     name, location:LOCATIONS.includes(raw.location) ? raw.location : 'pantry', state,
     qty:state==='out' ? null : normalizeQty(raw.qty),
     lastConfirmedAt:state==='unknown' ? null : confirmed,
     bestBy:normalizeBestBy(raw.bestBy), migrated:raw.migrated===true, archived:raw.archived===true,
+    kind:raw.kind==='leftover' ? 'leftover' : 'food',
   };
+  // Leftovers track portions and the day they were cooked instead of a stock level.
+  if(item.kind==='leftover'){
+    const portions=Number(raw.portions);
+    item.portions=Number.isInteger(portions)&&portions>=0 ? Math.min(portions,99) : 0;
+    item.cookedOn=parseISODate(raw.cookedOn) ? raw.cookedOn : null;
+    item.fromMeal=safeString(raw.fromMeal).slice(0,80);
+  }
+  return item;
 }
 function legacyQty(value){
   if(typeof value==='number') return normalizeQty({amount:value,unit:''});
@@ -975,7 +1050,7 @@ function migrateLegacyPantry(rawStatus,rawQty){
     const qty=legacyQty(qtys[name]);
     if(typeof old!=='string'&&!qty) return;
     const state=old==='out'||old==='plenty' ? old : 'unknown';
-    items.push({id:newId('p'),name,location:presetLocation(name),state,qty:state==='out'?null:qty,lastConfirmedAt:null,bestBy:null,migrated:true,archived:false});
+    items.push({id:newId('p'),name,location:presetLocation(name),state,qty:state==='out'?null:qty,lastConfirmedAt:null,bestBy:null,migrated:true,archived:false,kind:'food'});
   });
   return items;
 }
@@ -997,9 +1072,11 @@ function persistPantry(){
   if(!writeJSON(PANTRY_KEY,{version:2,items:pantryItems})) showToast('Could not store pantry changes on this device. Free up browser storage and try again.');
 }
 function activePantryItems(){ return pantryItems.filter(item=>!item.archived); }
+function activeFoodItems(){ return pantryItems.filter(item=>!item.archived&&item.kind!=='leftover'); }
+function activeLeftovers(){ return pantryItems.filter(item=>!item.archived&&item.kind==='leftover'); }
 function findPantryItem(id){ return pantryItems.find(item=>item.id===id); }
-function isConfirmedStock(item){ return STOCK_STATES.includes(item.state)&&!!item.lastConfirmedAt; }
-function needsCheck(item,now=new Date()){ return item.state==='unknown'||!item.lastConfirmedAt||daysSince(item.lastConfirmedAt,now)>STALE_DAYS; }
+function isConfirmedStock(item){ return item.kind!=='leftover'&&STOCK_STATES.includes(item.state)&&!!item.lastConfirmedAt; }
+function needsCheck(item,now=new Date()){ return item.kind!=='leftover'&&(item.state==='unknown'||!item.lastConfirmedAt||daysSince(item.lastConfirmedAt,now)>STALE_DAYS); }
 function formatAmount(amount){ return Number.isInteger(amount) ? String(amount) : String(Math.round(amount*100)/100); }
 function qtyText(qty){
   if(!qty) return '';
@@ -1019,6 +1096,12 @@ function confirmedText(item,now=new Date()){
 }
 function pantryMeta(item,now=new Date()){
   const parts=[];
+  if(item.kind==='leftover'){
+    parts.push(`${item.portions} portion${item.portions===1?'':'s'}`);
+    const cooked=parseISODate(item.cookedOn); if(cooked) parts.push(`cooked ${cooked.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'})}`);
+    const best=bestByText(item.bestBy); if(best) parts.push(best.replace('best by','use by'));
+    return parts.join(' · ');
+  }
   const qty=qtyText(item.qty);
   if(item.state==='unknown'){ parts.push('Unknown — nobody has checked'); if(qty) parts.push(`last noted ${qty}`); }
   else { if(qty) parts.push(qty); parts.push(confirmedText(item,now)+(item.lastConfirmedAt&&needsCheck(item,now)?' — check again':'')); }
@@ -1029,7 +1112,7 @@ function buildPantryFields(fields,existing){
   const name=safeString(fields.name).trim().replace(/\s+/g,' ');
   if(!name) return {error:'Give the food a name.'};
   if(name.length>60) return {error:'Keep the name under 60 characters.'};
-  const clash=activePantryItems().find(item=>item.id!==existing?.id&&item.name.toLowerCase()===name.toLowerCase());
+  const clash=existing?.kind==='leftover' ? null : activeFoodItems().find(item=>item.id!==existing?.id&&item.name.toLowerCase()===name.toLowerCase());
   if(clash) return {error:`${displayName(clash.name)} is already on your list — edit that one instead.`};
   const state=PANTRY_STATES.includes(fields.state) ? fields.state : 'unknown';
   const amountText=fields.amount==null ? '' : String(fields.amount).trim();
@@ -1044,7 +1127,7 @@ function buildPantryFields(fields,existing){
 function afterPantryChange(){ persistPantry(); renderPantry(); renderHome(); renderProposalPreview(); }
 function addPantryItem(fields={}){
   const built=buildPantryFields(fields,null); if(built.error) return {ok:false,error:built.error};
-  const item={id:newId('p'),...built.value,lastConfirmedAt:built.value.state==='unknown'?null:nowISO(),migrated:false,archived:false};
+  const item={id:newId('p'),...built.value,lastConfirmedAt:built.value.state==='unknown'?null:nowISO(),migrated:false,archived:false,kind:'food'};
   pantryItems.push(item); afterPantryChange();
   offerPantryUndo(`Added ${displayName(item.name)}`,item.id,null);
   return {ok:true,item};
@@ -1092,9 +1175,26 @@ function showToast(message,undoCall){
   toastTimer=setTimeout(()=>toast.classList.remove('show'),6000);
 }
 function setPantryFilter(filter){ pantryFilter=filter; renderPantry(); }
+function setLeftoverPortions(id,delta){
+  const item=findPantryItem(id); if(!item||item.kind!=='leftover') return false;
+  const before=clone(item);
+  item.portions=Math.max(0,Math.min(99,item.portions+delta));
+  item.lastConfirmedAt=nowISO();
+  if(item.portions===0) item.archived=true;
+  afterPantryChange();
+  offerPantryUndo(item.archived?`${item.name}: all eaten, removed from the list`:`${item.name}: ${item.portions} portion${item.portions===1?'':'s'} left`,id,before);
+  return true;
+}
 function pantryRowHTML(item,now){
   const icon=ITEM_ICONS[item.name.toLowerCase()]||LOCATION_ICONS[item.location];
   const name=escapeHTML(displayName(item.name));
+  if(item.kind==='leftover') return `<div class="pantry-row leftover">
+    <button class="pantry-row-main" onclick="openPantrySheet('${item.id}')" aria-label="Edit ${name}">
+      <span class="pantry-row-icon">🍲</span>
+      <span class="pantry-row-text"><span class="pantry-row-name">${name}</span><span class="pantry-row-meta">${escapeHTML(pantryMeta(item,now))}</span></span>
+    </button>
+    <div class="portion-step" role="group" aria-label="Portions of ${name}"><button class="seg-btn" onclick="setLeftoverPortions('${item.id}',-1)" aria-label="One portion eaten">−1</button><span>${item.portions}</span><button class="seg-btn" onclick="setLeftoverPortions('${item.id}',1)" aria-label="Add a portion">+1</button></div>
+  </div>`;
   const warn=needsCheck(item,now);
   return `<div class="pantry-row ${item.state}">
     <button class="pantry-row-main" onclick="openPantrySheet('${item.id}')" aria-label="Edit ${name}">
@@ -1105,23 +1205,29 @@ function pantryRowHTML(item,now){
   </div>`;
 }
 function renderPantry(){
-  const now=new Date(); const items=activePantryItems();
-  const checkCount=items.filter(item=>needsCheck(item,now)).length;
-  const inStock=items.filter(isConfirmedStock).length;
-  const outCount=items.filter(item=>item.state==='out').length;
-  document.getElementById('pantrySummary').textContent=items.length?`${inStock} in stock · ${outCount} out · ${checkCount} need${checkCount===1?'s':''} a check`:'Nothing tracked yet';
-  const filters=[['all','All'],['check',`Needs a check${checkCount?` (${checkCount})`:''}`],...LOCATIONS.map(loc=>[loc,LOCATION_SHORT[loc]])];
+  const now=new Date(); const items=activePantryItems(); const foods=activeFoodItems();
+  const leftoverCount=items.length-foods.length;
+  const checkCount=foods.filter(item=>needsCheck(item,now)).length;
+  const inStock=foods.filter(isConfirmedStock).length;
+  const outCount=foods.filter(item=>item.state==='out').length;
+  document.getElementById('pantrySummary').textContent=items.length?`${inStock} in stock · ${outCount} out · ${checkCount} need${checkCount===1?'s':''} a check${leftoverCount?` · ${leftoverCount} leftover${leftoverCount===1?'':'s'}`:''}`:'Nothing tracked yet';
+  const filters=[['all','All'],['check',`Needs a check${checkCount?` (${checkCount})`:''}`],['leftovers','Leftovers'],...LOCATIONS.map(loc=>[loc,LOCATION_SHORT[loc]])];
   document.getElementById('pantryFilters').innerHTML=filters.map(([key,label])=>`<button class="chip${pantryFilter===key?' active-green':''}" aria-pressed="${pantryFilter===key}" onclick="setPantryFilter('${key}')">${label}</button>`).join('');
-  const shown=items.filter(item=>pantryFilter==='all'||(pantryFilter==='check'?needsCheck(item,now):item.location===pantryFilter)).sort((a,b)=>a.name.localeCompare(b.name));
+  const matchesFilter=item=>pantryFilter==='all'||(pantryFilter==='check'?needsCheck(item,now):pantryFilter==='leftovers'?item.kind==='leftover':item.location===pantryFilter);
+  const shown=items.filter(matchesFilter).sort((a,b)=>a.name.localeCompare(b.name));
   let html='';
   if(!items.length) html='<div class="pantry-empty">Nothing tracked yet. Add what you actually have — or tap a common food below to add it.</div>';
   else if(!shown.length) html=`<div class="pantry-empty">${pantryFilter==='check'?'Everything has been confirmed in the last week.':'Nothing here yet.'}</div>`;
-  else LOCATIONS.forEach(loc=>{
-    const group=shown.filter(item=>item.location===loc);
-    if(group.length) html+=`<div class="label-sm pantry-group">${LOCATION_LABELS[loc]}</div>`+group.map(item=>pantryRowHTML(item,now)).join('');
-  });
+  else {
+    const leftovers=shown.filter(item=>item.kind==='leftover');
+    if(leftovers.length) html+='<div class="label-sm pantry-group">Leftovers</div>'+leftovers.map(item=>pantryRowHTML(item,now)).join('');
+    LOCATIONS.forEach(loc=>{
+      const group=shown.filter(item=>item.kind!=='leftover'&&item.location===loc);
+      if(group.length) html+=`<div class="label-sm pantry-group">${LOCATION_LABELS[loc]}</div>`+group.map(item=>pantryRowHTML(item,now)).join('');
+    });
+  }
   document.getElementById('pantryList').innerHTML=html;
-  const tracked=new Set(items.map(item=>item.name.toLowerCase()));
+  const tracked=new Set(foods.map(item=>item.name.toLowerCase()));
   const suggestions=ALL_ITEMS.map((name,index)=>({name,index})).filter(({name})=>!tracked.has(name));
   document.getElementById('pantrySuggestions').innerHTML=suggestions.length?`<div class="label-sm" style="margin-top:22px;">Common foods — not in your pantry list</div><div class="suggest-chips">${suggestions.map(({name,index})=>`<button class="chip" onclick="openPantrySheet('',${index})">＋ ${escapeHTML(displayName(name))}</button>`).join('')}</div>`:'';
   if(wallModeOn) renderWallPantry();
@@ -1346,13 +1452,18 @@ function validateProposal(text,now=new Date()){
   return {ok:!errors.length,errors,warnings,plan,fingerprint};
 }
 const QTY_PREFIX=/^\s*(?:about\s+)?[\d\s./½¼¾⅓-]*\s*(?:lbs?|pounds?|oz|ounces?|g|grams?|kg|cups?|tbsp|tablespoons?|tsp|teaspoons?|cans?|jars?|bags?|boxes?|bottles?|bunch(?:es)?|packs?|packages?|dozen|cloves?|heads?|pinch|large|medium|small)?\.?\s+(?:of\s+)?/i;
+// Longest pantry food name that appears as a word in the text ("chicken" in "2 lb chicken thighs").
+function findPantryMatch(text){
+  const lower=safeString(text).toLowerCase(); let match=null;
+  activeFoodItems().forEach(item=>{
+    const name=item.name.toLowerCase();
+    if(new RegExp(`\\b${escapeRegExp(name)}(?:e?s)?\\b`).test(lower)&&(!match||name.length>match.name.length)) match=item;
+  });
+  return match;
+}
 function ingredientCoverage(ingredient,groceryNames){
   const text=ingredient.toLowerCase(); const core=text.replace(QTY_PREFIX,'').trim()||text;
-  let match=null;
-  activePantryItems().forEach(item=>{
-    const name=item.name.toLowerCase();
-    if(new RegExp(`\\b${escapeRegExp(name)}(?:e?s)?\\b`).test(text)&&(!match||name.length>match.name.length)) match=item;
-  });
+  const match=findPantryMatch(ingredient);
   const onList=groceryNames.some(name=>name.length>=3&&(core.includes(name)||name.includes(core)));
   // Only confirmed stock counts as on hand; carried-over levels still need a check.
   if(match&&isConfirmedStock(match)) return match.state==='low' ? {status:'low',label:'on hand · low'} : {status:'onhand',label:'on hand'};
@@ -1476,7 +1587,18 @@ function toggleCheck(cat, name){
 function toggleCheckByIndex(catIndex,itemIndex){
   const list=mealPlan?.groceryList; const cat=Object.keys(list||{})[catIndex];
   const item=Array.isArray(list?.[cat]) ? list[cat][itemIndex] : null;
-  if(cat && item?.name) toggleCheck(cat,item.name);
+  if(cat && item?.name) toggleCheck(cat,groceryKey(cat,itemIndex));
+}
+// Check-off key: the item name, with "#2", "#3"… for repeats so duplicates don't share a check.
+function groceryKey(cat,index){
+  const items=Array.isArray(mealPlan?.groceryList?.[cat]) ? mealPlan.groceryList[cat] : [];
+  const name=safeString(items[index]?.name);
+  const earlier=items.slice(0,index).filter(item=>safeString(item?.name)===name).length;
+  return earlier ? `${name}#${earlier+1}` : name;
+}
+function groceryEntries(){
+  const list=isRecord(mealPlan?.groceryList) ? mealPlan.groceryList : {};
+  return Object.entries(list).flatMap(([cat,items])=>(Array.isArray(items)?items:[]).map((item,index)=>({cat,index,item:isRecord(item)?item:{},key:groceryKey(cat,index)})));
 }
 
 function resetShopping(){ checkedItems={}; localStorage.removeItem('fmp_checked'); renderShopping(); renderHome(); }
@@ -1487,12 +1609,12 @@ function renderShopping(){
   const list=mealPlan.groceryList;
   const budget=weeklyBudget;
   let total=0,checked=0;
-  Object.entries(list).forEach(([cat,items])=>{
-    (Array.isArray(items)?items:[]).forEach(item=>{ total+=Number(item?.estimatedPrice)||0; if(checkedItems[cat]?.[item?.name]) checked+=Number(item?.estimatedPrice)||0; });
-  });
+  groceryEntries().forEach(entry=>{ const price=Number(entry.item.estimatedPrice)||0; total+=price; if(checkedItems[entry.cat]?.[entry.key]) checked+=price; });
   const pct=Math.min((total/budget)*100,100);
   const over=total>budget;
-  let html=`<div class="budget-bar-wrap">
+  const home=putAwaySet(); const pending=pendingPutAwayEntries().length; const progress=groceryProgress();
+  let html=pending?`<div class="putaway-bar"><div><strong>${pending} checked, not put away yet</strong><div class="home-meta" style="margin-top:2px;">${progress.done===progress.total?'Everything is checked off. ':''}Checked means “in the cart”. Put things away to update the pantry.</div></div><button class="add-btn" onclick="openPutAway()">Put away</button></div>`:'';
+  html+=`<div class="budget-bar-wrap">
     <div class="budget-bar-labels"><span>Estimated cost vs budget</span><span>~$${total.toFixed(2)} / $${budget.toFixed(2)}</span></div>
     <div class="budget-bar-bg"><div class="budget-bar-fill ${over?'over':''}" style="width:${pct}%"></div></div>
     <div class="budget-sub-row"><span>Checked (est.): $${checked.toFixed(2)}</span><span>Remaining (est.): $${(total-checked).toFixed(2)}</span></div>
@@ -1503,14 +1625,16 @@ function renderShopping(){
     const cfg=CAT_CONFIG[cat]||{label:displayName(cat),icon:'🛒',cls:'cat-other'};
     html+=`<div class="cat-header ${cfg.cls}"><span class="cat-icon">${cfg.icon}</span><span class="cat-label">${escapeHTML(cfg.label)}</span><span class="cat-count">${items.length} items</span></div><div>`;
     items.forEach((item,itemIndex)=>{ item=isRecord(item)?item:{};
-      const isChecked=!!checkedItems[cat]?.[item.name];
+      const key=groceryKey(cat,itemIndex);
+      const isChecked=!!checkedItems[cat]?.[key];
+      const isHome=home.has(`${cat}|${key}`);
       const note=[safeString(item.quantity),safeString(item.mealNote)].filter(Boolean).join(' · ');
       const price=Number(item.estimatedPrice);
       const hasPrice=item.estimatedPrice!=null&&item.estimatedPrice!==''&&Number.isFinite(price);
       html+=`<button class="shop-item ${isChecked?'checked':''}" onclick="toggleCheckByIndex(${catIndex},${itemIndex})">
         <div class="shop-checkbox ${isChecked?'done':''}">${isChecked?'✓':''}</div>
         <div style="flex:1;text-align:left;">
-          <div class="shop-name ${isChecked?'done':''}">${escapeHTML(item.name)}</div>
+          <div class="shop-name ${isChecked?'done':''}">${escapeHTML(item.name)}${isHome?'<span class="home-tag">home ✓</span>':''}</div>
           ${note?`<div class="shop-note">${escapeHTML(note)}</div>`:''}
         </div>
         <div class="shop-price ${isChecked?'done':''}">${hasPrice?`~$${price.toFixed(2)}`:'no est.'}</div>
@@ -1520,6 +1644,387 @@ function renderShopping(){
   });
   html+=`<div class="baby-box"><span class="baby-box-icon">👶</span><div><div class="baby-box-title">Baby Safety Reminder</div><div class="baby-box-body">Cut all foods into small, soft pieces for your 1-year-old. Avoid honey, whole nuts, popcorn, and hard raw vegetables. Always supervise mealtimes.</div></div></div>`;
   c.innerHTML=html;
+}
+
+// ══ RECONCILIATION ══
+// In cart (check-off) never touches stock. Put-away, cooking and eating leftovers are previewed,
+// then applied as one logged action: {id, kind, key, at, label, planFp, day, groceryKeys, changes:[{itemId,before,after}], undoneAt}.
+function roundAmount(amount){ return Math.round(amount*100)/100; }
+function convertAmount(amount,from,to){
+  if(from===to) return amount;
+  const a=UNIT_FACTORS[from], b=UNIT_FACTORS[to];
+  return a&&b&&a[0]===b[0] ? amount*a[1]/b[1] : null;
+}
+function combineQty(existing,added){
+  if(!added||added.amount==null) return {ok:false,reason:'No amount to add.'};
+  if(!existing||existing.amount==null) return {ok:true,qty:{amount:added.amount,unit:added.unit}};
+  const converted=convertAmount(added.amount,added.unit,existing.unit);
+  if(converted===null) return {ok:false,reason:`Can't add ${qtyText(added)||added.amount} to ${qtyText(existing)||existing.amount}`};
+  return {ok:true,qty:{amount:roundAmount(existing.amount+converted),unit:existing.unit}};
+}
+function subtractQty(existing,used){
+  if(!existing||existing.amount==null||!used||used.amount==null) return {ok:false};
+  const converted=convertAmount(used.amount,used.unit,existing.unit);
+  if(converted===null) return {ok:false};
+  return {ok:true,qty:{amount:Math.max(0,roundAmount(existing.amount-converted)),unit:existing.unit}};
+}
+// "2 cups rice" → {amount:2, unit:'cup', rest:'rice'}; a bare number counts items.
+function parseQuantityText(text){
+  const s=safeString(text).trim();
+  const m=s.match(/^(\d+\s+\d+\/\d+|\d+\/\d+|\d*\.?\d+)\s*(.*)$/);
+  if(!m) return {amount:null,unit:'',rest:s};
+  const amount=parseAmount(m[1]); const rest=m[2].trim();
+  const word=rest.match(/^([a-zA-Z]+)\.?(?:\s+(?:of\s+)?|$)(.*)$/);
+  const unit=word ? normalizeUnit(word[1]) : '';
+  return unit ? {amount,unit,rest:word[2].trim()} : {amount,unit:'count',rest};
+}
+function rowQty(row){ const amount=parseAmount(row.amount); return amount===null ? null : {amount,unit:normalizeUnit(row.unit)}; }
+function canonical(value){
+  if(Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if(isRecord(value)) return `{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+  return JSON.stringify(value===undefined?null:value);
+}
+function sameItem(a,b){ return canonical(a?normalizePantryItem(a):null)===canonical(b?normalizePantryItem(b):null); }
+function diffItems(before,after){
+  const ids=new Set([...before,...after].map(item=>item.id)); const changes=[];
+  ids.forEach(id=>{
+    const was=before.find(item=>item.id===id)||null, now=after.find(item=>item.id===id)||null;
+    if(!sameItem(was,now)) changes.push({itemId:id,before:clone(was),after:clone(now)});
+  });
+  return changes;
+}
+function normalizeAction(raw){
+  if(!isRecord(raw)||typeof raw.id!=='string'||!/^[A-Za-z0-9_-]{1,40}$/.test(raw.id)||!ACTION_KINDS.includes(raw.kind)) return null;
+  return {id:raw.id,kind:raw.kind,key:safeString(raw.key),at:safeString(raw.at),label:safeString(raw.label),planFp:safeString(raw.planFp),
+    day:DAYS.includes(raw.day)?raw.day:'',groceryKeys:stringList(raw.groceryKeys),
+    changes:Array.isArray(raw.changes)?raw.changes.filter(change=>isRecord(change)&&typeof change.itemId==='string'):[],
+    undoneAt:typeof raw.undoneAt==='string'?raw.undoneAt:null};
+}
+function currentPlanFp(){ return safeString(mealPlan?.meta?.fingerprint); }
+function nightAction(day,kinds){ return actions.find(action=>!action.undoneAt&&action.day===day&&action.planFp===currentPlanFp()&&kinds.includes(action.kind)); }
+function putAwaySet(){ return new Set(actions.filter(action=>action.kind==='putaway'&&!action.undoneAt&&action.planFp===currentPlanFp()).flatMap(action=>action.groceryKeys)); }
+function pendingPutAwayEntries(){
+  const home=putAwaySet();
+  return groceryEntries().filter(entry=>entry.item.name&&checkedItems[entry.cat]?.[entry.key]&&!home.has(`${entry.cat}|${entry.key}`));
+}
+function shortTime(iso){
+  const date=new Date(iso); if(Number.isNaN(date.getTime())) return '';
+  return `${date.toLocaleDateString([],{weekday:'short'})} ${date.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}`;
+}
+function renderAfterAction(){ renderPantry(); renderShopping(); renderRecipes(); renderHome(); renderProposalPreview(); if(wallModeOn) renderWall(); }
+function storeActionState(){ return writeJSON(PANTRY_KEY,{version:2,items:pantryItems})&&writeJSON('fmp_actions',actions); }
+// Old actions are dropped after ACTION_LIMIT, except ones for the active plan (they say what's done this week).
+function commitAction(action,nextItems){
+  const previousItems=pantryItems, previousActions=actions;
+  pantryItems=nextItems;
+  actions=[action,...actions].filter((entry,index)=>index<ACTION_LIMIT||entry.planFp===currentPlanFp());
+  if(!storeActionState()){
+    pantryItems=previousItems; actions=previousActions; storeActionState();
+    showToast('This device refused to store the change, so nothing changed. Free up browser storage and try again.');
+    return false;
+  }
+  renderAfterAction();
+  showToast(action.label,`undoAction('${action.id}')`);
+  return true;
+}
+function newAction(kind,key,label,extra){ return {id:newId('a'),kind,key,at:nowISO(),label,planFp:currentPlanFp(),day:'',groceryKeys:[],changes:[],undoneAt:null,...extra}; }
+// Items changed since the action are left alone and reported, never overwritten.
+function undoAction(id){
+  const action=actions.find(entry=>entry.id===id);
+  if(!action||action.undoneAt) return {status:'none',conflicts:[]};
+  if(!actions.filter(entry=>!entry.undoneAt).slice(0,UNDO_LIMIT).includes(action)) return {status:'too-old',conflicts:[]};
+  const next=clone(pantryItems); const conflicts=[];
+  action.changes.forEach(change=>{
+    const index=next.findIndex(item=>item.id===change.itemId);
+    const current=index>=0 ? next[index] : null;
+    if(!sameItem(current,change.after)){ conflicts.push(displayName((current||change.after||change.before)?.name||'An item')); return; }
+    if(change.before){ if(index>=0) next[index]=clone(change.before); else next.push(clone(change.before)); }
+    else if(index>=0) next.splice(index,1);
+  });
+  const previousItems=pantryItems;
+  pantryItems=next; action.undoneAt=nowISO();
+  if(!storeActionState()){
+    pantryItems=previousItems; action.undoneAt=null; storeActionState();
+    showToast('This device refused to store the undo, so nothing changed.');
+    return {status:'failed',conflicts:[]};
+  }
+  renderAfterAction();
+  showToast(conflicts.length?`Undone, except ${conflicts.join(', ')} (changed since — left as is)`:`Undone: ${action.label}`);
+  return {status:'undone',conflicts};
+}
+function nightActionsHTML(night){
+  if(!night||!DAYS.includes(night.day)) return '';
+  const day=night.day;
+  const done=nightAction(day,night.isLeftoverNight?['ate']:['cooked','skipped']);
+  if(done){
+    const label=done.kind==='ate'?'Leftovers eaten ✓':done.kind==='cooked'?'Cooked ✓':'Skipped';
+    return `<div class="night-actions"><span class="done-tag">${label} ${escapeHTML(shortTime(done.at))}</span><button class="reset-btn" onclick="undoAction('${done.id}')">↺ Undo</button></div>`;
+  }
+  if(night.isLeftoverNight) return `<div class="night-actions"><button class="add-btn" onclick="openAteSheet('${day}')">Ate leftovers</button></div>`;
+  return `<div class="night-actions"><button class="add-btn" onclick="openCookSheet('${day}')">We cooked this</button><button class="reset-btn" onclick="skipNight('${day}')">Didn't cook this</button></div>`;
+}
+function recentActionsCard(now=new Date()){
+  const active=actions.filter(action=>!action.undoneAt);
+  const recent=active.filter(action=>daysSince(action.at,now)<=3).slice(0,5);
+  if(!recent.length) return '';
+  const undoable=new Set(active.slice(0,UNDO_LIMIT).map(action=>action.id));
+  return `<div class="card"><div class="label-sm">Done recently</div>${recent.map(action=>`<div class="recent-row"><span>✓ ${escapeHTML(action.label)} <span class="home-meta">· ${escapeHTML(shortTime(action.at))}</span></span>${undoable.has(action.id)?`<button class="reset-btn" onclick="undoAction('${action.id}')">Undo</button>`:''}</div>`).join('')}</div>`;
+}
+function stateButtons(selected,options,onclickFor){
+  return `<div class="state-seg">${options.map(([value,label])=>`<button class="seg-btn${selected===value?` on ${value||'unknown'}`:''}" aria-pressed="${selected===value}" onclick="${onclickFor(value)}">${label}</button>`).join('')}</div>`;
+}
+function unitOptions(selected){ return `<option value="">—</option>${UNITS.map(unit=>`<option value="${unit}"${unit===selected?' selected':''}>${unit}</option>`).join('')}`; }
+
+// ── Put away groceries ──
+function putAwayRowFor(entry){
+  const name=safeString(entry.item.name).trim(); const quantity=safeString(entry.item.quantity).trim();
+  const parsed=parseQuantityText(quantity); const match=findPantryMatch(name);
+  const row={rowId:newId('r'),ref:`${entry.cat}|${entry.key}`,label:quantity?`${name} · ${quantity}`:name,action:'put',
+    itemId:match?match.id:'',name,location:match?match.location:(CATEGORY_LOCATION[entry.cat]||'pantry'),
+    amount:parsed.amount!=null?formatAmount(parsed.amount):'',unit:parsed.amount!=null?parsed.unit:'',state:'plenty',mode:'',conflict:false};
+  refreshPutAwayRow(row); return row;
+}
+// Modes: add (combine), replace (set amount), keep (amount unchanged, confirm level).
+function refreshPutAwayRow(row,chosen){
+  const item=row.itemId ? findPantryItem(row.itemId) : null; const bought=rowQty(row);
+  row.conflict=false;
+  if(!bought){ row.mode='keep'; return; }
+  if(!item||item.qty?.amount==null){ row.mode='replace'; return; }
+  const combinable=combineQty(item.qty,bought).ok;
+  row.conflict=!combinable;
+  if(chosen&&(chosen!=='add'||combinable)) row.mode=chosen;
+  else if(!['replace','keep'].includes(row.mode)||(row.mode==='add'&&!combinable)) row.mode=combinable?'add':'replace';
+}
+function openPutAway(){
+  const entries=pendingPutAwayEntries();
+  putAwayDraft=entries.length ? {rows:entries.map(putAwayRowFor),error:''} : null;
+  if(putAwayDraft){ renderPutAway(); document.getElementById('putAwaySheet').classList.add('open'); }
+  else showToast('Nothing checked is waiting to be put away.');
+  return entries.length;
+}
+function closePutAway(){ document.getElementById('putAwaySheet').classList.remove('open'); }
+function addPutAwayRow(){
+  if(!putAwayDraft) return;
+  putAwayDraft.rows.push({rowId:newId('r'),ref:null,label:'Something else we bought',action:'put',itemId:'',name:'',location:'fridge',amount:'',unit:'',state:'plenty',mode:'keep',conflict:false});
+  renderPutAway();
+}
+function updatePutAwayRow(rowId,field,value){
+  const row=putAwayDraft?.rows.find(entry=>entry.rowId===rowId); if(!row) return;
+  if(field==='action'&&['put','ignore','later'].includes(value)) row.action=value;
+  else if(field==='name'){
+    row.name=safeString(value).trim();
+    if(!row.ref){ const existing=activeFoodItems().find(item=>item.name.toLowerCase()===row.name.toLowerCase()); row.itemId=existing?existing.id:''; if(existing) row.location=existing.location; }
+  }
+  else if(field==='location'&&LOCATIONS.includes(value)) row.location=value;
+  else if(field==='state'&&STOCK_STATES.includes(value)) row.state=value;
+  else if(field==='amount') row.amount=safeString(value).trim();
+  else if(field==='unit') row.unit=normalizeUnit(value);
+  refreshPutAwayRow(row,field==='mode'?value:undefined);
+  renderPutAway();
+}
+function putAwayResult(row){
+  const item=row.itemId ? findPantryItem(row.itemId) : null; const bought=rowQty(row);
+  const level=STATE_LABELS[row.state];
+  if(!item) return `New item · ${qtyText(bought)||'no amount'} · ${LOCATION_SHORT[row.location]} · ${level}`;
+  let after=item.qty;
+  if(bought&&row.mode==='add') after=combineQty(item.qty,bought).qty;
+  else if(bought&&row.mode==='replace') after=bought;
+  return `${qtyText(item.qty)||STATE_LABELS[item.state]} → ${qtyText(after)||'no amount'} · ${level}`;
+}
+function renderPutAway(){
+  const body=document.getElementById('putAwayBody'); const draft=putAwayDraft;
+  if(!draft){ body.innerHTML=''; return; }
+  const rows=draft.rows.map(row=>{
+    const item=row.itemId ? findPantryItem(row.itemId) : null; const id=row.rowId;
+    let fields='';
+    if(row.action==='put'){
+      const nameField=!item||!row.ref ? `<input class="field-input" value="${escapeHTML(row.name)}" placeholder="What did you buy?" maxlength="60" onchange="updatePutAwayRow('${id}','name',this.value)">` : '';
+      const location=!item ? `<select class="field-input" aria-label="Where it lives" onchange="updatePutAwayRow('${id}','location',this.value)">${LOCATIONS.map(loc=>`<option value="${loc}"${row.location===loc?' selected':''}>${LOCATION_SHORT[loc]}</option>`).join('')}</select>` : '';
+      const modes=item&&item.qty?.amount!=null&&rowQty(row) ? `<select class="field-input" aria-label="How to record the amount" onchange="updatePutAwayRow('${id}','mode',this.value)">${[['add',"Add to what's there"],['replace','Replace amount'],['keep','Keep amount, confirm level']].filter(([value])=>value!=='add'||!row.conflict).map(([value,label])=>`<option value="${value}"${row.mode===value?' selected':''}>${label}</option>`).join('')}</select>` : '';
+      fields=`${nameField}<div class="field-row"><input class="field-input" style="flex:1;min-width:0;" inputmode="decimal" aria-label="Amount bought" placeholder="Amount" value="${escapeHTML(row.amount)}" onchange="updatePutAwayRow('${id}','amount',this.value)"><select class="field-input" style="flex:1;min-width:0;" aria-label="Unit" onchange="updatePutAwayRow('${id}','unit',this.value)">${unitOptions(row.unit)}</select></div>
+        ${location?`<div class="field-row">${location}</div>`:''}${modes?`<div class="field-row">${modes}</div>`:''}
+        <div class="field-row">${stateButtons(row.state,[['low','Low'],['some','Some'],['plenty','Plenty']],value=>`updatePutAwayRow('${id}','state','${value}')`)}</div>
+        ${row.conflict?`<div class="rec-warn">${escapeHTML(combineQty(item.qty,rowQty(row)).reason)} — different kinds of units.</div>`:''}
+        <div class="rec-result">${escapeHTML(putAwayResult(row))}</div>`;
+    }
+    return `<div class="rec-row${row.action==='later'?' skipped':''}"><div class="rec-head"><div><div class="rec-label">${escapeHTML(row.label)}</div><div class="rec-target">${row.action!=='put'?'':item?`→ ${escapeHTML(displayName(item.name))} (${LOCATION_SHORT[item.location]})`:'→ new pantry item'}</div></div>
+      <select class="field-input rec-action" aria-label="What to do with ${escapeHTML(row.label)}" onchange="updatePutAwayRow('${id}','action',this.value)">${[['put','Put away'],['ignore','Not tracked'],['later','Later']].map(([value,label])=>`<option value="${value}"${row.action===value?' selected':''}>${label}</option>`).join('')}</select></div>${fields}</div>`;
+  }).join('');
+  body.innerHTML=`<div class="section-sub" style="margin-top:6px;">Only what you put away changes the pantry, and each item counts as confirmed now. “Later” items stay checked and come back next time.</div>${rows}
+    <button class="reset-btn" style="margin-top:12px;" onclick="addPutAwayRow()">＋ Something else we bought</button>
+    <div class="field-error" role="alert">${escapeHTML(draft.error||'')}</div>
+    <button class="gen-btn" onclick="applyPutAway()">Apply</button>`;
+}
+function applyPutAway(){
+  const draft=putAwayDraft; if(!draft) return 'none';
+  const rows=draft.rows.filter(row=>row.action!=='later');
+  if(!rows.length){ putAwayDraft=null; closePutAway(); return 'none'; }
+  for(const row of rows.filter(entry=>entry.action==='put')){
+    if(!row.name){ draft.error='Every item you put away needs a name.'; renderPutAway(); return 'error'; }
+    if(row.amount&&parseAmount(row.amount)===null){ draft.error=`Amount for ${row.name} must be a number like 2, 1.5 or 1/2.`; renderPutAway(); return 'error'; }
+  }
+  const next=clone(pantryItems); const now=nowISO();
+  rows.filter(row=>row.action==='put').forEach(row=>{
+    let item=row.itemId ? next.find(entry=>entry.id===row.itemId) : next.find(entry=>!entry.archived&&entry.kind!=='leftover'&&entry.name.toLowerCase()===row.name.toLowerCase());
+    if(!item){ item={id:newId('p'),name:row.name.slice(0,60),location:row.location,state:'unknown',qty:null,lastConfirmedAt:null,bestBy:null,migrated:false,archived:false,kind:'food'}; next.push(item); }
+    item.archived=false;
+    if(!row.itemId) item.location=row.location;
+    const bought=rowQty(row);
+    if(bought&&row.mode==='add'){ const combined=combineQty(item.qty,bought); item.qty=combined.ok?combined.qty:bought; }
+    else if(bought&&row.mode==='replace') item.qty=bought;
+    item.state=row.state; item.lastConfirmedAt=now; item.migrated=false;
+  });
+  const put=rows.filter(row=>row.action==='put').length, ignored=rows.length-put;
+  const label=[put?`Put away ${put} item${put===1?'':'s'}`:'',ignored?`${ignored} marked not tracked`:''].filter(Boolean).join(' · ');
+  const refs=rows.filter(row=>row.ref).map(row=>row.ref);
+  const action=newAction('putaway',`putaway:${currentPlanFp()}:${refs.join(',')}`,label,{groceryKeys:refs,changes:diffItems(pantryItems,next)});
+  if(!commitAction(action,next)) return 'error';
+  putAwayDraft=null; closePutAway();
+  return 'applied';
+}
+
+// ── Cooking, leftovers, skipping ──
+function cookRowFor(text){
+  const parsed=parseQuantityText(text); const match=findPantryMatch(text);
+  const row={rowId:newId('r'),label:text,itemId:match?match.id:'',include:true,mode:'none',amount:'',unit:'',level:''};
+  if(!match) return row;
+  if(parsed.amount!=null&&match.qty?.amount!=null&&convertAmount(parsed.amount,parsed.unit,match.qty.unit)!==null){ row.mode='deduct'; row.amount=formatAmount(parsed.amount); row.unit=parsed.unit; }
+  else row.mode='level';
+  return row;
+}
+function openCookSheet(day){
+  const night=planNights().find(entry=>entry.day===day);
+  if(!night||night.isLeftoverNight) return 'none';
+  ateDraft=null;
+  const existing=nightAction(day,['cooked']);
+  if(existing){ cookDraft=null; showToast(`Already logged: cooked ${shortTime(existing.at)}`,`undoAction('${existing.id}')`); return 'duplicate'; }
+  const dinner=dinnerFor(night);
+  cookDraft={day,meal:safeString(dinner.name),rows:stringList(dinner.ingredients).map(cookRowFor),leftover:{create:!!night.alsoEatenOn,portions:String(servings),useBy:''},error:''};
+  renderCookSheet(); document.getElementById('cookSheet').classList.add('open');
+  return 'ready';
+}
+function closeCookSheet(){ document.getElementById('cookSheet').classList.remove('open'); }
+function updateCookRow(rowId,field,value){
+  const row=cookDraft?.rows.find(entry=>entry.rowId===rowId); if(!row) return;
+  if(field==='include') row.include=value===true||value==='true';
+  else if(field==='amount') row.amount=safeString(value).trim();
+  else if(field==='level'&&['','out','low','some','plenty'].includes(value)) row.level=value;
+  renderCookSheet();
+}
+function setLeftoverField(field,value){
+  if(!cookDraft) return;
+  if(field==='create') cookDraft.leftover.create=value===true||value==='true';
+  else if(field==='portions') cookDraft.leftover.portions=safeString(String(value)).trim();
+  renderCookSheet();
+}
+// Use-by is only ever the household's own estimate; there is no default.
+function setLeftoverUseBy(days,now=new Date()){
+  if(!cookDraft) return;
+  if(!days) cookDraft.leftover.useBy='';
+  else { const date=new Date(now); date.setDate(date.getDate()+days); cookDraft.leftover.useBy=isoDate(date); }
+  renderCookSheet();
+}
+function cookRowResult(row){
+  const item=findPantryItem(row.itemId); if(!item) return 'not in pantry · no change';
+  if(!row.include) return 'skipped · no change';
+  if(row.mode==='deduct'){
+    const used=rowQty(row); const result=subtractQty(item.qty,used);
+    if(!result.ok) return 'amount not readable · no change';
+    return result.qty.amount<=0 ? `${qtyText(item.qty)} → 0 · Out` : `${qtyText(item.qty)} → ${qtyText(result.qty)}`;
+  }
+  return row.level ? `${STATE_LABELS[item.state]} → ${STATE_LABELS[row.level]}` : `${STATE_LABELS[item.state]} · no change`;
+}
+function renderCookSheet(){
+  const body=document.getElementById('cookSheetBody');
+  if(ateDraft){ renderAteSheet(body); return; }
+  const draft=cookDraft; if(!draft){ body.innerHTML=''; return; }
+  document.getElementById('cookSheetTitle').textContent='We cooked this';
+  const rows=draft.rows.map(row=>{
+    const item=findPantryItem(row.itemId); const id=row.rowId;
+    let controls='';
+    if(item&&row.include&&row.mode==='deduct') controls=`<div class="field-row"><input class="field-input" style="flex:1;" inputmode="decimal" aria-label="Amount used" value="${escapeHTML(row.amount)}" onchange="updateCookRow('${id}','amount',this.value)"><div class="rec-target" style="align-self:center;flex:1;">${escapeHTML(row.unit==='count'?'count':row.unit)} used</div></div>`;
+    if(item&&row.include&&row.mode==='level') controls=`<div class="rec-target" style="margin-top:8px;">How much is left?</div><div class="field-row">${stateButtons(row.level,[['','No change'],['out','Out'],['low','Low'],['some','Some'],['plenty','Plenty']],value=>`updateCookRow('${id}','level','${value}')`)}</div>`;
+    return `<div class="rec-row${row.include?'':' skipped'}"><div class="rec-head"><div><div class="rec-label">${escapeHTML(row.label)}</div><div class="rec-target">${item?`→ ${escapeHTML(displayName(item.name))}`:'not tracked in pantry'}</div></div>${item?`<label class="check-row" style="margin-top:0;"><input type="checkbox" ${row.include?'':'checked'} onchange="updateCookRow('${id}','include',!this.checked)" style="width:18px;height:18px;accent-color:var(--amber);"> Skip</label>`:''}</div>${controls}<div class="rec-result">${escapeHTML(cookRowResult(row))}</div></div>`;
+  }).join('');
+  const leftover=draft.leftover;
+  const useByDate=parseISODate(leftover.useBy);
+  const leftoverHTML=`<div class="rec-row"><label class="check-row" style="margin-top:0;"><input type="checkbox" ${leftover.create?'checked':''} onchange="setLeftoverField('create',this.checked)" style="width:18px;height:18px;accent-color:var(--amber);"> <span class="rec-label">Save leftovers</span></label>
+    ${leftover.create?`<label class="field-label" for="leftoverPortions">Portions</label><input class="field-input" id="leftoverPortions" inputmode="numeric" value="${escapeHTML(leftover.portions)}" onchange="setLeftoverField('portions',this.value)">
+    <div class="field-label">Use by (optional, your own estimate)</div><div class="use-chips">${[[0,'No date'],[2,'+2 days'],[3,'+3 days'],[4,'+4 days']].map(([days,label])=>`<button class="chip" onclick="setLeftoverUseBy(${days})">${label}</button>`).join('')}</div>
+    <div class="rec-result">${useByDate?`Use by ~${escapeHTML(useByDate.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'}))} (est.)`:'No use-by date'}</div>`:''}</div>`;
+  body.innerHTML=`<div class="section-sub" style="margin-top:6px;">${escapeHTML(draft.day)}: ${escapeHTML(draft.meal)}. Check what was used — nothing changes until you apply.</div>${rows||'<div class="pantry-empty">No ingredients listed for this meal.</div>'}${leftoverHTML}
+    <div class="field-error" role="alert">${escapeHTML(draft.error||'')}</div><button class="gen-btn" onclick="applyCook()">Apply</button>`;
+}
+function applyCook(){
+  const draft=cookDraft; if(!draft) return 'none';
+  if(nightAction(draft.day,['cooked'])){ cookDraft=null; closeCookSheet(); return 'duplicate'; }
+  const portions=Number(draft.leftover.portions);
+  if(draft.leftover.create&&!(Number.isInteger(portions)&&portions>=1&&portions<=99)){ draft.error='Portions must be a whole number from 1 to 99.'; renderCookSheet(); return 'error'; }
+  const next=clone(pantryItems); const now=nowISO();
+  draft.rows.filter(row=>row.include&&row.itemId).forEach(row=>{
+    const item=next.find(entry=>entry.id===row.itemId); if(!item) return;
+    if(row.mode==='deduct'){
+      const result=subtractQty(item.qty,rowQty(row)); if(!result.ok) return;
+      if(result.qty.amount<=0){ item.state='out'; item.qty=null; } else item.qty=result.qty;
+    } else if(row.mode==='level'&&row.level){ item.state=row.level; if(row.level==='out') item.qty=null; }
+    else return;
+    item.lastConfirmedAt=now; item.migrated=false;
+  });
+  if(draft.leftover.create) next.push({id:newId('p'),name:`Leftovers: ${draft.meal}`.slice(0,60),location:'fridge',state:'some',qty:null,lastConfirmedAt:now,
+    bestBy:draft.leftover.useBy?{value:draft.leftover.useBy,source:'estimated'}:null,migrated:false,archived:false,kind:'leftover',portions,cookedOn:isoDate(new Date()),fromMeal:draft.meal});
+  const action=newAction('cooked',`cooked:${currentPlanFp()}:${draft.day}`,`Cooked ${draft.meal}`,{day:draft.day,changes:diffItems(pantryItems,next)});
+  if(!commitAction(action,next)) return 'error';
+  cookDraft=null; closeCookSheet();
+  return 'applied';
+}
+function skipNight(day){
+  const night=planNights().find(entry=>entry.day===day);
+  if(!night||night.isLeftoverNight) return 'none';
+  if(nightAction(day,['cooked','skipped'])) return 'duplicate';
+  return commitAction(newAction('skipped',`skipped:${currentPlanFp()}:${day}`,`Skipped ${safeString(dinnerFor(night).name)}`,{day}),pantryItems) ? 'skipped' : 'error';
+}
+function openAteSheet(day){
+  const night=planNights().find(entry=>entry.day===day&&entry.isLeftoverNight);
+  if(!night) return 'none';
+  cookDraft=null;
+  const existing=nightAction(day,['ate']);
+  if(existing){ ateDraft=null; showToast(`Already logged: leftovers eaten ${shortTime(existing.at)}`,`undoAction('${existing.id}')`); return 'duplicate'; }
+  const meal=safeString(dinnerFor(night).name);
+  const options=activeLeftovers().filter(item=>item.portions>0)
+    .sort((a,b)=>(b.fromMeal===meal)-(a.fromMeal===meal)||safeString(b.cookedOn).localeCompare(safeString(a.cookedOn)));
+  if(!options.length){ ateDraft=null; showToast(`No leftovers of ${meal} are logged. Log them when you cook, or add them in Pantry.`); return 'no-leftovers'; }
+  ateDraft={day,meal,itemId:options[0].id,portions:Math.min(servings,options[0].portions),error:''};
+  renderCookSheet(); document.getElementById('cookSheet').classList.add('open');
+  return 'ready';
+}
+function updateAteDraft(field,value){
+  if(!ateDraft) return;
+  if(field==='itemId'&&activeLeftovers().some(item=>item.id===value)) ateDraft.itemId=value;
+  else if(field==='portions') ateDraft.portions=Number(value);
+  renderCookSheet();
+}
+function renderAteSheet(body){
+  const draft=ateDraft; const item=findPantryItem(draft.itemId);
+  document.getElementById('cookSheetTitle').textContent='Ate leftovers';
+  const left=item ? Math.max(0,item.portions-(Number.isInteger(draft.portions)?draft.portions:0)) : 0;
+  body.innerHTML=`<div class="section-sub" style="margin-top:6px;">${escapeHTML(draft.day)}: ${escapeHTML(draft.meal)}.</div>
+    <label class="field-label" for="ateItem">Which leftovers</label><select class="field-input" id="ateItem" onchange="updateAteDraft('itemId',this.value)">${activeLeftovers().filter(entry=>entry.portions>0).map(entry=>`<option value="${entry.id}"${entry.id===draft.itemId?' selected':''}>${escapeHTML(entry.name)} (${entry.portions})</option>`).join('')}</select>
+    <label class="field-label" for="atePortions">Portions eaten</label><input class="field-input" id="atePortions" inputmode="numeric" value="${escapeHTML(String(draft.portions))}" onchange="updateAteDraft('portions',this.value)">
+    <div class="rec-result">${item?`${item.portions} → ${left} portion${left===1?'':'s'}${left===0?' · removed from the list':''}`:''}</div>
+    <div class="field-error" role="alert">${escapeHTML(draft.error||'')}</div><button class="gen-btn" onclick="applyAte()">Apply</button>`;
+}
+function applyAte(){
+  const draft=ateDraft; if(!draft) return 'none';
+  if(nightAction(draft.day,['ate'])){ ateDraft=null; closeCookSheet(); return 'duplicate'; }
+  if(!(Number.isInteger(draft.portions)&&draft.portions>=1)){ draft.error='Portions eaten must be a whole number of at least 1.'; renderCookSheet(); return 'error'; }
+  const next=clone(pantryItems); const item=next.find(entry=>entry.id===draft.itemId);
+  if(!item){ draft.error='Those leftovers are no longer on the list.'; renderCookSheet(); return 'error'; }
+  item.portions=Math.max(0,item.portions-draft.portions); item.lastConfirmedAt=nowISO();
+  if(item.portions===0) item.archived=true;
+  const action=newAction('ate',`ate:${currentPlanFp()}:${draft.day}`,`Ate ${draft.portions} portion${draft.portions===1?'':'s'} of ${item.name.replace(/^Leftovers: /,'')}`,{day:draft.day,changes:diffItems(pantryItems,next)});
+  if(!commitAction(action,next)) return 'error';
+  ateDraft=null; closeCookSheet();
+  return 'applied';
 }
 
 // ══ RECIPES ══
@@ -1565,7 +2070,7 @@ function renderRecipeCard(dayPlan, isToday){
       bodyHtml=`<div class="note-box note-leftover">
         <div class="note-box-label">↺ Leftover Night</div>
         <div class="note-box-body">Tonight is a reheat night. Serve remaining portions of <strong>${escapeHTML(dinner.name)}</strong> from the batch cook.${dinner.babyVersion?`<br><br>Baby: ${escapeHTML(dinner.babyVersion)}`:''}</div>
-      </div>`;
+      </div>${nightActionsHTML(dayPlan)}`;
     } else {
       bodyHtml='';
 
@@ -1587,6 +2092,7 @@ function renderRecipeCard(dayPlan, isToday){
         });
         bodyHtml+='</div>';
       }
+      bodyHtml+=nightActionsHTML(dayPlan);
       if(dinner.babyVersion){
         bodyHtml+=`<div class="note-box note-baby"><div class="note-box-label">👶 Baby Version</div><div class="note-box-body">${escapeHTML(dinner.babyVersion)}</div></div>`;
       }
@@ -1730,7 +2236,7 @@ function renderWallSide(){
 
 function renderWallPantry(){
   const dotColor={out:'#ef4444',low:'#f97316',some:'#f59e0b',plenty:'#22c55e'};
-  const known=activePantryItems().filter(item=>item.state!=='unknown').sort((a,b)=>a.name.localeCompare(b.name));
+  const known=activeFoodItems().filter(item=>item.state!=='unknown').sort((a,b)=>a.name.localeCompare(b.name));
   document.getElementById('wallPantryBar').innerHTML=
     '<span style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;flex-shrink:0;">Pantry:</span>'+
     (known.length?known.map(item=>`<div class="wall-pantry-item">
