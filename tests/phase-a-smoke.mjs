@@ -44,12 +44,12 @@ assert.ok(script, 'inline application script must be present');
 const applicationScript = script.replace(/\ninit\(\);\nif\(mealPlan\) renderPlanReady\(\);\s*$/, '').concat(`
 this.setMealPlanForTest = value => { mealPlan = value; };
 this.setFeedbackForTest = value => { mealFeedback = value; };
-this.getStateForTest = () => ({pantryState, pantryQty, checkedItems, exclusions, otherExcl, cuisineStyle, weeklyBudget, servings, mealHistory, mealFeedback});
+this.getStateForTest = () => ({pantryItems, checkedItems, exclusions, otherExcl, cuisineStyle, weeklyBudget, servings, mealHistory, mealFeedback});
 this.renderAll = () => { groceryProgress(); renderHome(); renderPlanReady(); renderShopping(); renderRecipes(); renderWallStrip(); renderWallRecipe(); renderWallSide(); renderHistoryPanel(); };
 this.buildPacketForTest = buildPlanningPacket;`);
 
 const expectedInitIds = [
-  'proteinsGrid', 'vegetablesGrid', 'spicesGrid', 'exclusionChips', 'cuisineChips',
+  'pantryList', 'pantryFilters', 'pantrySuggestions', 'pantrySummary', 'exclusionChips', 'cuisineChips',
   'monthName', 'budgetSlider', 'budgetDisplay', 'srvDisplay', 'srvMinus', 'srvPlus',
   'seasonalToggle', 'workPackToggle', 'otherExclusion', 'workPackNote', 'shoppingContent',
   'recipesContent', 'homeContent', 'historyCount', 'planReadyCard', 'planReadyMeta',
@@ -99,7 +99,7 @@ const malformedSandbox = createSandbox(malformedStorage);
 assert.doesNotThrow(() => malformedSandbox.init(), 'init/render must tolerate malformed persisted local state');
 const normalized = malformedSandbox.getStateForTest();
 assert.equal(JSON.stringify(normalized.exclusions), '[]', 'fmp_excl must normalize to []');
-assert.equal(JSON.stringify(normalized.pantryQty), '{"chicken":"7"}', 'fmp_pantry_qty must retain only safe string values');
+assert.equal(JSON.stringify(normalized.pantryItems.map(({ name, state, qty }) => ({ name, state, qty }))), '[{"name":"chicken","state":"unknown","qty":{"amount":7,"unit":""}}]', 'legacy fmp_pantry_qty must migrate only safe values, unconfirmed');
 assert.equal(JSON.stringify(normalized.checkedItems), '{}', 'fmp_checked must normalize to {}');
 assert.equal(normalized.weeklyBudget, 90, 'invalid budget must default to 90');
 assert.equal(normalized.servings, 2, 'invalid servings must default to 2');
