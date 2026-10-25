@@ -90,6 +90,14 @@ test('weekly backup downloads, proves it restores, and keeps the newest 12', asy
     assert.equal(kept.length, 12);
     assert.ok(!kept.some(name => name.endsWith('.partial')));
     await assert.rejects(runBackup({ dir, url: s.base, token: 'wrong-token-wrong-token-wrong' }), /Export failed: 401/);
+
+    // Two runs in the same second (e.g. the weekly task right after a manual run) both land.
+    const same = new Date(2027, 5, 1, 4);
+    const a = await runBackup({ dir, url: s.base, token: BACKUP_TOKEN, now: same });
+    const b = await runBackup({ dir, url: s.base, token: BACKUP_TOKEN, now: same });
+    assert.notEqual(a.folder, b.folder);
+    assert.ok(fs.existsSync(b.folder));
+    assert.ok(!fs.readdirSync(dir).some(name => name.endsWith('.partial')), 'no half-written folders are left behind');
   } finally { await s.stop(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
