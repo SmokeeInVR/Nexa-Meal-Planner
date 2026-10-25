@@ -20,8 +20,16 @@ for (const marker of requiredMarkers) assert.ok(html.includes(marker), `Missing 
 assert.ok(!/https?:\/\//i.test(html), 'Phase A index.html must not contain an http(s) URL or external stylesheet');
 assert.ok(!/<link\b[^>]*\brel=["']stylesheet["']/i.test(html), 'Phase A must not load an external stylesheet');
 
+// Phase 4a boundary: the app may talk only to its own household hub. There is exactly one network
+// call site, hubRequest, and it accepts nothing but same-origin /api/ paths.
+const fetchSites = [...html.matchAll(/\bfetch\(/g)].length;
+assert.equal(fetchSites, 1, 'Exactly one network call site (hubRequest) may exist');
+const hubRequestSource = html.match(/function hubRequest\(path,options=\{\}\)\{[\s\S]*?\n\}/)?.[0] || '';
+assert.ok(hubRequestSource.includes('fetch(path,'), 'The only fetch must live in hubRequest');
+assert.ok(hubRequestSource.includes('^\\/api\\/'), 'hubRequest must only allow /api/ paths');
+
 const forbiddenMarkers = [
-  'fetch(', '/api/nexa/chat', '/api/ai/chat', 'SYNC_URL', 'Railway', 'railway',
+  '/api/nexa/chat', '/api/ai/chat', 'SYNC_URL', 'Railway', 'railway',
   'nexa-finance', 'apiKey', 'fmp_key', 'nexa_key', 'keyModal', 'showKeyModal',
   'saveKey', 'clearKey', 'generatePlan', 'swapMeal', 'regenerateGroceryList',
   'fitness', 'Fitness', 'NEXAFIT', 'Quick Swap', 'quickSwap', 'syncToCloud',
@@ -44,12 +52,12 @@ assert.ok(script, 'inline application script must be present');
 const applicationScript = script.replace(/\ninit\(\);\nif\(mealPlan\) renderPlanReady\(\);\s*$/, '').concat(`
 this.setMealPlanForTest = value => { mealPlan = value; };
 this.setFeedbackForTest = value => { mealFeedback = value; };
-this.getStateForTest = () => ({pantryState, pantryQty, checkedItems, exclusions, otherExcl, cuisineStyle, weeklyBudget, servings, mealHistory, mealFeedback});
+this.getStateForTest = () => ({pantryItems, checkedItems, exclusions, otherExcl, cuisineStyle, weeklyBudget, servings, mealHistory, mealFeedback});
 this.renderAll = () => { groceryProgress(); renderHome(); renderPlanReady(); renderShopping(); renderRecipes(); renderWallStrip(); renderWallRecipe(); renderWallSide(); renderHistoryPanel(); };
 this.buildPacketForTest = buildPlanningPacket;`);
 
 const expectedInitIds = [
-  'proteinsGrid', 'vegetablesGrid', 'spicesGrid', 'exclusionChips', 'cuisineChips',
+  'pantryList', 'pantryFilters', 'pantrySuggestions', 'pantrySummary', 'exclusionChips', 'cuisineChips',
   'monthName', 'budgetSlider', 'budgetDisplay', 'srvDisplay', 'srvMinus', 'srvPlus',
   'seasonalToggle', 'workPackToggle', 'otherExclusion', 'workPackNote', 'shoppingContent',
   'recipesContent', 'homeContent', 'historyCount', 'planReadyCard', 'planReadyMeta',
@@ -99,7 +107,7 @@ const malformedSandbox = createSandbox(malformedStorage);
 assert.doesNotThrow(() => malformedSandbox.init(), 'init/render must tolerate malformed persisted local state');
 const normalized = malformedSandbox.getStateForTest();
 assert.equal(JSON.stringify(normalized.exclusions), '[]', 'fmp_excl must normalize to []');
-assert.equal(JSON.stringify(normalized.pantryQty), '{"chicken":"7"}', 'fmp_pantry_qty must retain only safe string values');
+assert.equal(JSON.stringify(normalized.pantryItems.map(({ name, state, qty }) => ({ name, state, qty }))), '[{"name":"chicken","state":"unknown","qty":{"amount":7,"unit":""}}]', 'legacy fmp_pantry_qty must migrate only safe values, unconfirmed');
 assert.equal(JSON.stringify(normalized.checkedItems), '{}', 'fmp_checked must normalize to {}');
 assert.equal(normalized.weeklyBudget, 90, 'invalid budget must default to 90');
 assert.equal(normalized.servings, 2, 'invalid servings must default to 2');
