@@ -154,6 +154,8 @@ test('who ate it: portions per person, nutrition carried to leftovers, Today car
     await fetch(`${s.base}/api/link/targets`, json('PUT', { calories: 2000, protein: 150 }, { authorization: `Bearer ${token}` }));
 
     const you = await phone(s.base, 'marcel');
+    you.app.renderHome();
+    assert.match(you.el('homeContent').innerHTML, /0 \/ 2000 kcal/, 'targets show before any week is planned');
     const today = new Date();
     const wed = new Date(today); wed.setDate(today.getDate() - ((today.getDay() - 3 + 7) % 7));
     const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

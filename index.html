@@ -1075,7 +1075,7 @@ function renderHome(now=new Date()){
   const c=document.getElementById('homeContent'); if(!c) return;
   const nights=planNights();
   const pantryCard=pantryHomeCard(now);
-  if(!nights.length){ c.innerHTML=`<div class="empty-state" style="height:auto;"><div class="empty-icon">⌂</div><div class="empty-title">No accepted plan yet</div><div class="empty-sub">NEXA can propose a Wednesday-to-Tuesday plan for Marcel to approve. This dashboard will not send anything.</div><button class="gen-btn" style="max-width:280px;margin-top:20px" onclick="openPlanningPacket()">✦ Plan with NEXA</button><button class="reset-btn" style="margin-top:10px" onclick="openPlanImport()">📥 Paste NEXA's proposal</button></div><div class="home-grid">${pantryCard}</div>`; return; }
+  if(!nights.length){ c.innerHTML=`<div class="empty-state" style="height:auto;"><div class="empty-icon">⌂</div><div class="empty-title">No accepted plan yet</div><div class="empty-sub">NEXA can propose a Wednesday-to-Tuesday plan for Marcel to approve. This dashboard will not send anything.</div><button class="gen-btn" style="max-width:280px;margin-top:20px" onclick="openPlanningPacket()">✦ Plan with NEXA</button><button class="reset-btn" style="margin-top:10px" onclick="openPlanImport()">📥 Paste NEXA's proposal</button></div><div class="home-grid">${todayCardHTML(now)}${pantryCard}</div>`; return; }
   const win=mealPlan?.meta?.window; const start=parseISODate(win?.start), end=parseISODate(win?.end);
   const midnight=new Date(now); midnight.setHours(0,0,0,0);
   const beforeStart=!!start&&midnight<start, afterEnd=!!end&&midnight>end;
