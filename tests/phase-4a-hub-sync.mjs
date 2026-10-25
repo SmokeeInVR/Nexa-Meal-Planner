@@ -196,5 +196,6 @@ test('a lost sign-in is shown as an error, not silently ignored', async () => {
   const ctx = createApp({}, { fetch: async () => new Response(JSON.stringify({ error: 'Sign in' }), { status: 401, headers: { 'content-type': 'application/json' } }) });
   ctx.app.init();
   assert.equal(await ctx.app.__state().hubReady, 'error');
-  assert.match(ctx.el('hubChip').innerHTML, /Sign in/);
+  assert.match(ctx.el('hubChip').innerHTML, /Problem/);
+  assert.equal(ctx.app.__state().hub.message, 'Sign in', "the server's reason is shown");
 });

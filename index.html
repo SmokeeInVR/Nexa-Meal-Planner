@@ -3218,7 +3218,7 @@ function hubUndoReplace(){
   hubPersistAll(); hubSoon(); showToast('Put back their change');
   return true;
 }
-function hubSetState(state,message=''){ hub.state=state; hub.message=message; renderHubChip(); if(document.getElementById('hubSheet').classList.contains?.('open')) renderHubSheet(); }
+function hubSetState(state,message=''){ hub.state=state; hub.message=message; renderHubChip(); renderHubSheet(); }
 function hubSoon(){
   if(hubApplying||!hub.household||hub.pendingMerge) return;
   if(hubSoonTimer) clearTimeout(hubSoonTimer);
@@ -3236,7 +3236,7 @@ async function hubSync(){
   try {
     const {body,sent}=hubPayload();
     const res=await hubPost(body);
-    if(res.status===401||res.status===403){ hubSetState('error','Signed out of the household. Reload the page to sign in again.'); return hub.state; }
+    if(res.status===401||res.status===403){ hubSignedOut(await res.json().catch(()=>({}))); return hub.state; }
     if(!res.ok) throw new Error(`hub answered ${res.status}`);
     hubApplyResponse(await res.json(),sent);
     hub.lastSyncAt=nowISO(); hubSetState('synced');
@@ -3247,6 +3247,35 @@ async function hubSync(){
   return hub.state;
 }
 function hubRefresh(){ return hubSync(); }
+// Passcode sign-in (the Vercel deployment). Sync stops until this phone signs in; its data stays put.
+let hubPicking = null;
+function hubSignedOut(info){
+  if(hubTimer){ clearInterval(hubTimer); hubTimer=null; }
+  hub.household=null; hub.member=null;
+  if(info?.signIn==='passcode'){ hubSetState('signin',''); openHubSheet(); }
+  else hubSetState('error',info?.error||"This phone isn't signed in to the household. Reload the page to sign in.");
+}
+async function hubSignIn(passcode,member){
+  let res,data;
+  try {
+    res=await hubRequest('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(member?{passcode,member}:{passcode})});
+    data=await res.json();
+  } catch { hubSetState('signin',"Can't reach the household server right now."); return 'error'; }
+  if(!res.ok){ hubPicking=null; hubSetState('signin',data.error||'Sign-in failed.'); return 'error'; }
+  if(!member){ hubPicking={passcode,members:Array.isArray(data.members)?data.members:[]}; hubSetState('signin',''); return 'pick'; }
+  hubPicking=null; hub.message='';
+  return hubConnect();
+}
+function hubSubmitPasscode(){
+  const input=document.getElementById('hubPasscode'); const value=input?input.value:'';
+  if(!value){ hubSetState('signin','Enter the household passcode.'); return; }
+  hubSignIn(value);
+}
+async function hubSignOut(){
+  try { await hubRequest('/api/logout',{method:'POST'}); } catch {}
+  hubSignedOut({signIn:'passcode'});
+  return hub.state;
+}
 function hubLocalIsEmpty(){ return !activePantryItems().length&&!liveRecipes().length&&!planNights().length&&!actions.length; }
 // reset: start from the household's copy alone (download or merge); without it, this phone's data is kept to upload.
 function hubAdopt(full,{reset}={}){
@@ -3260,11 +3289,13 @@ async function hubConnect(){
   try {
     const res=await hubRequest('/api/session');
     const json=(res.headers.get('content-type')||'').includes('application/json');
-    if(json&&(res.status===401||res.status===403)){ hubSetState('error',"This phone isn't signed in to the household. Reload the page to sign in."); return hub.state; }
+    if(json&&(res.status===401||res.status===403)){ hubSignedOut(await res.json()); return hub.state; }
+    if(json&&res.status===503){ hubSetState('error',(await res.json()).error||'The household server is not set up yet.'); return hub.state; }
     if(!res.ok||!json){ hubSetState('off'); return hub.state; }
     session=await res.json();
   } catch { hubSetState('off'); return hub.state; }
   hub.member=session.member; hub.members=Array.isArray(session.members)?session.members:[]; hub.household=session.household?.id||null;
+  hub.canSignOut=session.signOut===true; hubPicking=null;
   if(!hub.household){ hubSetState('error','The hub did not say which household this is.'); return hub.state; }
   if(localStorage.getItem('fmp_hub_household')===hub.household){
     const shadow=readJSON('fmp_hub_shadow',null);
@@ -3359,7 +3390,7 @@ async function hubSyncPhotos(){
 }
 function renderHubChip(){
   const chip=document.getElementById('hubChip');
-  const labels={synced:'● Synced',syncing:'↻ Syncing',offline:'○ Offline',error:'⚠ Sign in',merge:'⚑ Needs you'};
+  const labels={synced:'● Synced',syncing:'↻ Syncing',offline:'○ Offline',error:'⚠ Problem',signin:'🔑 Sign in',merge:'⚑ Needs you'};
   chip.style.display=hub.state==='off'?'none':'';
   chip.className=`hub-chip hub-${hub.state}`;
   chip.innerHTML=labels[hub.state]||'';
@@ -3377,12 +3408,23 @@ function renderHubSheet(){
       +`<button class="gen-btn" onclick="hubMergeChoice('merge')">Merge into the household</button><button class="link-btn" onclick="hubMergeChoice('household')">Use the household's data instead</button>`;
     return;
   }
-  const titles={synced:['done','Synced with the household'],syncing:['pending','Syncing…'],offline:['notice','Offline'],error:['error','Not signed in'],off:['notice','This phone only']};
+  if(hub.state==='signin'){
+    const error=hub.message?`<div class="field-error" role="alert">${escapeHTML(hub.message)}</div>`:'';
+    body.innerHTML=hubPicking
+      ? `<div class="section-sub" style="margin-top:8px;">Who's using this phone?</div><div class="recipe-actions">${hubPicking.members.map(member=>`<button class="add-btn" onclick="hubSignIn(hubPicking.passcode,'${escapeHTML(member.key)}')">${escapeHTML(member.name)}</button>`).join('')}</div>${error}`
+      : `<div class="section-sub" style="margin-top:8px;">Enter the household passcode once on this phone to share the pantry, recipes and plans. Your data on this phone stays put until you do.</div>
+        <label class="field-label" for="hubPasscode">Household passcode</label>
+        <input class="field-input" id="hubPasscode" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')hubSubmitPasscode()">
+        ${error}<button class="gen-btn" onclick="hubSubmitPasscode()">Continue</button>`;
+    return;
+  }
+  const titles={synced:['done','Synced with the household'],syncing:['pending','Syncing…'],offline:['notice','Offline'],error:['error','Not connected'],off:['notice','This phone only']};
   const [kind,title]=titles[hub.state]||titles.off;
   const people=hub.members.map(member=>escapeHTML(member.name)).join(' and ');
   body.innerHTML=statusBox(kind,title,`${hub.member?`Signed in as <b>${escapeHTML(hub.member.name)}</b>${people?` · household: ${people}`:''}<br>`:''}${hub.lastSyncAt?`Last synced ${escapeHTML(shortTime(hub.lastSyncAt))}.`:''}${hub.message?`<div class="status-note">${escapeHTML(hub.message)}</div>`:''}`)
-    +'<div class="section-hint">Your data lives on the household PC. Photos sync too. Changes sync every 30 seconds while the app is open.</div>'
-    +(hub.household?'<button class="reset-btn wide-btn" onclick="hubRefresh()">Check for changes now</button>':'');
+    +'<div class="section-hint">Pantry, recipes, plans and photos are shared by the household. Changes sync every 30 seconds while the app is open.</div>'
+    +(hub.household?'<button class="reset-btn wide-btn" onclick="hubRefresh()">Check for changes now</button>':'')
+    +(hub.household&&hub.canSignOut?'<button class="link-btn" onclick="hubSignOut()">Sign this phone out</button>':'');
 }
 
 // ══ BOOT ══
