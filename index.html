@@ -259,6 +259,13 @@ details.prefs[open] .chev { transform:rotate(180deg); }
 .hub-error { color:var(--red); border-color:rgba(239,68,68,0.5); }
 .hub-merge { color:var(--violet); border-color:rgba(167,139,250,0.5); }
 
+/* PHASE 5: WHO ATE IT + TODAY */
+.eaten-row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 0; font-size:14px; color:var(--text); }
+.today-person { padding:10px 0; border-top:1px solid var(--border); }
+.today-person:first-of-type { border-top:none; }
+.nutri-line { display:flex; justify-content:space-between; font-size:12px; color:var(--text-dim); margin-top:6px; }
+.today-person .home-progress { height:5px; margin-top:3px; }
+
 /* PHASE 3: COOK MODE */
 .cook-mode { display:none; position:fixed; inset:0; z-index:550; background:#0a0a0a; }
 .cook-mode.open { display:flex; }
@@ -894,6 +901,7 @@ let wakeLock = null;
 let pendingPhotoRecipeId = null;
 let pantrySearch = '';
 let shoppingUndo = null;
+let householdTargets = {};
 let mealPlan = null;
 let checkedItems = {};
 let exclusions = [];
@@ -1004,6 +1012,8 @@ function loadState(){
   const storedRecipes=readJSON('fmp_recipes',[]); const seenRecipes=new Set();
   recipes=Array.isArray(storedRecipes)?storedRecipes.map(normalizeRecipe).filter(recipe=>recipe&&!seenRecipes.has(recipe.id)&&seenRecipes.add(recipe.id)):[];
   weekPicks=normalizeWeekPicks(readJSON('fmp_week_picks',null));
+  const storedTargets=readJSON('fmp_targets',{}); householdTargets={};
+  if(isRecord(storedTargets)) Object.entries(storedTargets).forEach(([key,value])=>{ const targets=normalizeNutrition(value,'entered'); if(targets) householdTargets[key]={...targets,updatedAt:safeString(value.updatedAt)}; });
   const storedTypes=readJSON('fmp_mealtypes',{}); mealTypes={...MEAL_TYPE_DEFAULTS};
   if(isRecord(storedTypes)) Object.keys(MEAL_TYPE_DEFAULTS).forEach(key=>{ if(typeof storedTypes[key]==='boolean') mealTypes[key]=storedTypes[key]; });
   const storedUndo=readJSON('fmp_undo_accept',null); acceptUndo=isRecord(storedUndo)&&typeof storedUndo.acceptedFingerprint==='string'?storedUndo:null;
@@ -1082,6 +1092,7 @@ function renderHome(now=new Date()){
   else tonightCard=`<div class="card"><div class="label-sm">Tonight's dinner</div><div class="home-value">${escapeHTML(dinnerFor(tonight).name||'No dinner named')}</div><div class="home-meta">${tonight.isLeftoverNight?'Leftovers night — reheat and serve.':'Cook night — make the planned meal.'}</div>${nightActionsHTML(tonight)}</div>`;
   c.innerHTML=`<div class="section-title">Home</div><div class="section-sub">${accepted?`${escapeHTML(accepted)} (Wednesday-to-Tuesday)`:planWindow()} · accepted plan overview</div><div class="home-grid">
     ${tonightCard}
+    ${todayCardHTML(now)}
     <div class="card"><div class="label-sm">Next cooking action</div><div class="home-value">${nextCook?`${escapeHTML(nextCook.day)}: ${escapeHTML(dinnerFor(nextCook).name||'No dinner named')}`:'No more cook nights in this plan'}</div><div class="home-meta">Cook once, then use the accepted plan as written.</div></div>
     ${recentActionsCard(now)}
     <div class="card"><div class="label-sm">Grocery list progress</div><div class="home-value">${shop.done} of ${shop.total} items checked</div><div class="home-progress"><span style="width:${pct}%"></span></div><div class="home-meta">Estimated list: $${shop.cost.toFixed(2)} · target $${weeklyBudget} · comfortable maximum $${max}${notPutAway?`<br>${notPutAway} checked item${notPutAway===1?'':'s'} not put away yet.`:''}</div>${notPutAway?'<button class="reset-btn" style="margin-top:10px" onclick="openPutAway()">Put away groceries</button>':''}</div>
@@ -1220,6 +1231,7 @@ function normalizePantryItem(raw){
     item.portions=Number.isInteger(portions)&&portions>=0 ? Math.min(portions,99) : 0;
     item.cookedOn=parseISODate(raw.cookedOn) ? raw.cookedOn : null;
     item.fromMeal=safeString(raw.fromMeal).slice(0,80);
+    item.nutrition=normalizeNutrition(raw.nutrition,'estimated');
   }
   return item;
 }
@@ -1905,7 +1917,15 @@ function normalizeAction(raw){
   return {id:raw.id,kind:raw.kind,key:safeString(raw.key),at:safeString(raw.at),label:safeString(raw.label),planFp:safeString(raw.planFp),
     day:DAYS.includes(raw.day)?raw.day:'',groceryKeys:stringList(raw.groceryKeys),
     changes:Array.isArray(raw.changes)?raw.changes.filter(change=>isRecord(change)&&typeof change.itemId==='string'):[],
-    undoneAt:typeof raw.undoneAt==='string'?raw.undoneAt:null};
+    undoneAt:typeof raw.undoneAt==='string'?raw.undoneAt:null,
+    eaten:normalizeEaten(raw.eaten), perServing:normalizeNutrition(raw.perServing,'estimated'), ateOn:parseISODate(raw.ateOn)?raw.ateOn:''};
+}
+// Portions per household member for one meal: {memberKey: 0..10, in halves}.
+function normalizeEaten(raw){
+  if(!isRecord(raw)) return null;
+  const eaten={};
+  Object.entries(raw).forEach(([key,value])=>{ const portions=Math.round(Number(value)*2)/2; if(typeof key==='string'&&key.length<=80&&portions>0&&portions<=10) eaten[key]=portions; });
+  return Object.keys(eaten).length?eaten:null;
 }
 function currentPlanFp(){ return safeString(mealPlan?.meta?.fingerprint); }
 function nightAction(day,kinds){ return actions.find(action=>!action.undoneAt&&action.day===day&&action.planFp===currentPlanFp()&&kinds.includes(action.kind)); }
@@ -2106,7 +2126,8 @@ function openCookSheet(day){
   const existing=nightAction(day,['cooked']);
   if(existing){ cookDraft=null; showToast(`Already logged: cooked ${shortTime(existing.at)}`,`undoAction('${existing.id}')`); return 'duplicate'; }
   const dinner=dinnerFor(night);
-  cookDraft={day,key:`cooked:${currentPlanFp()}:${day}`,meal:safeString(dinner.name),rows:stringList(dinner.ingredients).map(cookRowFor),leftover:{create:!!night.alsoEatenOn,portions:String(servings),useBy:''},error:''};
+  cookDraft={day,key:`cooked:${currentPlanFp()}:${day}`,meal:safeString(dinner.name),rows:stringList(dinner.ingredients).map(cookRowFor),leftover:{create:!!night.alsoEatenOn,portions:String(servings),useBy:''},error:'',
+    eaten:defaultEaten(),perServing:dinnerNutrition(dinner)};
   renderCookSheet(); document.getElementById('cookSheet').classList.add('open');
   return 'ready';
 }
@@ -2118,7 +2139,8 @@ function openRecipeCookSheet(recipeId,cookFor=servings){
   const existing=actions.find(action=>!action.undoneAt&&action.key===key);
   if(existing){ cookDraft=null; showToast(`Already logged today: ${recipe.name}`,`undoAction('${existing.id}')`); return 'duplicate'; }
   const factor=cookFor/recipe.servings;
-  cookDraft={day:'',key,meal:recipe.name,rows:recipe.ingredients.map(line=>cookRowFor(scaleIngredient(line,factor))),leftover:{create:false,portions:String(Math.max(1,cookFor)),useBy:''},error:''};
+  cookDraft={day:'',key,meal:recipe.name,rows:recipe.ingredients.map(line=>cookRowFor(scaleIngredient(line,factor))),leftover:{create:false,portions:String(Math.max(1,cookFor)),useBy:''},error:'',
+    eaten:defaultEaten(),perServing:recipe.nutrition?{...recipe.nutrition}:null};
   renderCookSheet(); document.getElementById('cookSheet').classList.add('open');
   return 'ready';
 }
@@ -2171,7 +2193,7 @@ function renderCookSheet(){
     ${leftover.create?`<label class="field-label" for="leftoverPortions">Portions</label><input class="field-input" id="leftoverPortions" inputmode="numeric" value="${escapeHTML(leftover.portions)}" onchange="setLeftoverField('portions',this.value)">
     <div class="field-label">Use by (optional, your own estimate)</div><div class="use-chips">${[[0,'No date'],[2,'+2 days'],[3,'+3 days'],[4,'+4 days']].map(([days,label])=>`<button class="chip" onclick="setLeftoverUseBy(${days})">${label}</button>`).join('')}</div>
     <div class="rec-result">${useByDate?`Use by ~${escapeHTML(useByDate.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'}))} (est.)`:'No use-by date'}</div>`:''}</div>`;
-  body.innerHTML=`<div class="section-sub" style="margin-top:6px;">${draft.day?`${escapeHTML(draft.day)}: `:''}${escapeHTML(draft.meal)}. Check what was used — nothing changes until you apply.</div>${rows||'<div class="pantry-empty">No ingredients listed for this meal.</div>'}${leftoverHTML}
+  body.innerHTML=`<div class="section-sub" style="margin-top:6px;">${draft.day?`${escapeHTML(draft.day)}: `:''}${escapeHTML(draft.meal)}. Check what was used — nothing changes until you apply.</div>${eatenHTML(draft)}${rows||'<div class="pantry-empty">No ingredients listed for this meal.</div>'}${leftoverHTML}
     <div class="field-error" role="alert">${escapeHTML(draft.error||'')}</div><button class="gen-btn" onclick="applyCook()">Apply</button>`;
 }
 function applyCook(){
@@ -2190,8 +2212,9 @@ function applyCook(){
     item.lastConfirmedAt=now; item.migrated=false;
   });
   if(draft.leftover.create) next.push({id:newId('p'),name:`Leftovers: ${draft.meal}`.slice(0,60),location:'fridge',state:'some',qty:null,lastConfirmedAt:now,
-    bestBy:draft.leftover.useBy?{value:draft.leftover.useBy,source:'estimated'}:null,migrated:false,archived:false,kind:'leftover',portions,cookedOn:isoDate(new Date()),fromMeal:draft.meal});
-  const action=newAction('cooked',draft.key,`Cooked ${draft.meal}`,{day:draft.day,changes:diffItems(pantryItems,next)});
+    bestBy:draft.leftover.useBy?{value:draft.leftover.useBy,source:'estimated'}:null,migrated:false,archived:false,kind:'leftover',portions,cookedOn:isoDate(new Date()),fromMeal:draft.meal,
+    nutrition:draft.perServing});
+  const action=newAction('cooked',draft.key,`Cooked ${draft.meal}`,{day:draft.day,changes:diffItems(pantryItems,next),...eatenFields(draft)});
   if(!commitAction(action,next)) return 'error';
   cookDraft=null; closeCookSheet();
   return 'applied';
@@ -2212,7 +2235,8 @@ function openAteSheet(day){
   const options=activeLeftovers().filter(item=>item.portions>0)
     .sort((a,b)=>(b.fromMeal===meal)-(a.fromMeal===meal)||safeString(b.cookedOn).localeCompare(safeString(a.cookedOn)));
   if(!options.length){ ateDraft=null; showToast(`No leftovers of ${meal} are logged. Log them when you cook, or add them in Pantry.`); return 'no-leftovers'; }
-  ateDraft={day,meal,itemId:options[0].id,portions:Math.min(servings,options[0].portions),error:''};
+  ateDraft={day,meal,itemId:options[0].id,portions:Math.min(servings,options[0].portions),error:'',eaten:defaultEaten()};
+  syncAtePortions();
   renderCookSheet(); document.getElementById('cookSheet').classList.add('open');
   return 'ready';
 }
@@ -2220,15 +2244,77 @@ function updateAteDraft(field,value){
   if(!ateDraft) return;
   if(field==='itemId'&&activeLeftovers().some(item=>item.id===value)) ateDraft.itemId=value;
   else if(field==='portions') ateDraft.portions=Number(value);
+  syncAtePortions();
   renderCookSheet();
+}
+// ── Who ate it: portions per household member, so each person's day adds up ──
+function eatingMembers(){ return hub.household&&Array.isArray(hub.members) ? hub.members.filter(member=>typeof member.key==='string'&&member.key) : []; }
+function defaultEaten(){ return Object.fromEntries(eatingMembers().map(member=>[member.key,1])); }
+// With members, the leftovers removed are everyone's portions added up, rounded up to whole portions.
+function syncAtePortions(){
+  if(!ateDraft||!eatingMembers().length) return;
+  const item=findPantryItem(ateDraft.itemId);
+  const total=Math.ceil(Object.values(ateDraft.eaten||{}).reduce((sum,value)=>sum+value,0));
+  ateDraft.portions=item?Math.min(item.portions,total):total;
+}
+function setEaten(memberKey,delta){
+  const draft=ateDraft||cookDraft; if(!draft||!eatingMembers().some(member=>member.key===memberKey)) return;
+  draft.eaten={...(draft.eaten||{})};
+  draft.eaten[memberKey]=Math.max(0,Math.min(10,(draft.eaten[memberKey]||0)+delta));
+  syncAtePortions(); renderCookSheet();
+}
+function eatenHTML(draft){
+  const members=eatingMembers(); if(!members.length) return '';
+  const per=draft.perServing||(ateDraft&&findPantryItem(ateDraft.itemId)?.nutrition)||null;
+  return `<div class="rec-row"><div class="rec-label">Who ate it</div><div class="rec-target">${per?`About ${per.calories??'?'} kcal per portion (${per.source==='entered'?'your numbers':'estimate'})`:'No nutrition info for this meal — portions still count as meals.'}</div>
+    ${members.map(member=>{ const value=draft.eaten?.[member.key]||0; return `<div class="eaten-row"><span>${escapeHTML(member.name)}</span><span class="portion-step"><button class="seg-btn" onclick="setEaten('${escapeHTML(member.key)}',-0.5)" aria-label="Less for ${escapeHTML(member.name)}">−</button><span>${niceAmount(value)||'0'}</span><button class="seg-btn" onclick="setEaten('${escapeHTML(member.key)}',0.5)" aria-label="More for ${escapeHTML(member.name)}">+</button></span></div>`; }).join('')}</div>`;
+}
+function eatenFields(draft){
+  const eaten=normalizeEaten(draft.eaten);
+  return eaten ? {eaten,perServing:draft.perServing||null,ateOn:isoDate(new Date())} : {};
+}
+function dinnerNutrition(dinner){
+  const recipe=dinnerRecipe(dinner);
+  return normalizeNutrition(dinner?.nutrition,'estimated')||(recipe?.nutrition?{...recipe.nutrition}:null);
+}
+// Each member's eaten totals for one day, from logged meals that weren't undone.
+function dayTotals(memberKey,date){
+  const totals={calories:0,protein:0,carbs:0,fat:0,meals:0,unknown:0};
+  actions.forEach(action=>{
+    const portions=action.eaten?.[memberKey];
+    if(action.undoneAt||action.ateOn!==date||!portions) return;
+    totals.meals++;
+    if(!action.perServing){ totals.unknown++; return; }
+    ['calories','protein','carbs','fat'].forEach(key=>{ totals[key]+=(action.perServing[key]||0)*portions; });
+  });
+  ['calories','protein','carbs','fat'].forEach(key=>{ totals[key]=Math.round(totals[key]); });
+  return totals;
+}
+function todayCardHTML(now=new Date()){
+  const members=eatingMembers(); if(!members.length) return '';
+  const date=isoDate(now);
+  const rows=members.map(member=>{
+    const totals=dayTotals(member.key,date); const targets=householdTargets[member.key];
+    const bar=(key,label,unit)=>{
+      const goal=targets?.[key];
+      if(!goal) return `<div class="nutri-line"><span>${label}</span><span>${totals[key]}${unit}</span></div>`;
+      const pct=Math.min(100,Math.round(totals[key]/goal*100));
+      return `<div class="nutri-line"><span>${label}</span><span>${totals[key]} / ${goal}${unit}</span></div><div class="home-progress"><span style="width:${pct}%"></span></div>`;
+    };
+    return `<div class="today-person"><div class="flex-between"><b>${escapeHTML(member.name)}</b><span class="home-meta" style="margin:0;">${totals.meals} meal${totals.meals===1?'':'s'} logged</span></div>
+      ${bar('calories','Calories',' kcal')}${bar('protein','Protein',' g')}${bar('carbs','Carbs',' g')}${bar('fat','Fat',' g')}
+      <div class="home-meta">${targets?'Targets from Nexa Fitness.':'Set your targets in Nexa Fitness.'}${totals.unknown?` ${totals.unknown} meal${totals.unknown===1?' has':'s have'} no nutrition info.`:''}</div></div>`;
+  }).join('');
+  return `<div class="card"><div class="label-sm">Today · estimates</div>${rows}</div>`;
 }
 function renderAteSheet(body){
   const draft=ateDraft; const item=findPantryItem(draft.itemId);
   document.getElementById('cookSheetTitle').textContent='Ate leftovers';
   const left=item ? Math.max(0,item.portions-(Number.isInteger(draft.portions)?draft.portions:0)) : 0;
+  const members=eatingMembers();
   body.innerHTML=`<div class="section-sub" style="margin-top:6px;">${escapeHTML(draft.day)}: ${escapeHTML(draft.meal)}.</div>
     <label class="field-label" for="ateItem">Which leftovers</label><select class="field-input" id="ateItem" onchange="updateAteDraft('itemId',this.value)">${activeLeftovers().filter(entry=>entry.portions>0).map(entry=>`<option value="${entry.id}"${entry.id===draft.itemId?' selected':''}>${escapeHTML(entry.name)} (${entry.portions})</option>`).join('')}</select>
-    <label class="field-label" for="atePortions">Portions eaten</label><input class="field-input" id="atePortions" inputmode="numeric" value="${escapeHTML(String(draft.portions))}" onchange="updateAteDraft('portions',this.value)">
+    ${members.length?eatenHTML(draft):`<label class="field-label" for="atePortions">Portions eaten</label><input class="field-input" id="atePortions" inputmode="numeric" value="${escapeHTML(String(draft.portions))}" onchange="updateAteDraft('portions',this.value)">`}
     <div class="rec-result">${item?`${item.portions} → ${left} portion${left===1?'':'s'}${left===0?' · removed from the list':''}`:''}</div>
     <div class="field-error" role="alert">${escapeHTML(draft.error||'')}</div><button class="gen-btn" onclick="applyAte()">Apply</button>`;
 }
@@ -2240,7 +2326,8 @@ function applyAte(){
   if(!item){ draft.error='Those leftovers are no longer on the list.'; renderCookSheet(); return 'error'; }
   item.portions=Math.max(0,item.portions-draft.portions); item.lastConfirmedAt=nowISO();
   if(item.portions===0) item.archived=true;
-  const action=newAction('ate',`ate:${currentPlanFp()}:${draft.day}`,`Ate ${draft.portions} portion${draft.portions===1?'':'s'} of ${item.name.replace(/^Leftovers: /,'')}`,{day:draft.day,changes:diffItems(pantryItems,next)});
+  const action=newAction('ate',`ate:${currentPlanFp()}:${draft.day}`,`Ate ${draft.portions} portion${draft.portions===1?'':'s'} of ${item.name.replace(/^Leftovers: /,'')}`,
+    {day:draft.day,changes:diffItems(pantryItems,next),...eatenFields({...draft,perServing:findPantryItem(draft.itemId)?.nutrition||null})});
   if(!commitAction(action,next)) return 'error';
   ateDraft=null; closeCookSheet();
   return 'applied';
@@ -3119,7 +3206,7 @@ function hubPayload(){
     sent.records[key]=hash;
   });
   Object.entries(hubShadow.records).forEach(([key,seen])=>{
-    if(docs.has(key)||seen.deleted) return;
+    if(docs.has(key)||seen.deleted||key.startsWith('targets:')) return;
     const split=key.indexOf(':');
     records.push({type:key.slice(0,split),id:key.slice(split+1),data:null,deleted:true,baseVersion:seen.v});
     sent.records[key]='deleted';
@@ -3144,6 +3231,12 @@ function applyHubPrefs(prefs){
 }
 function applyHubRecord(record){
   const key=`${record.type}:${record.id}`; const data=record.deleted?null:record.data;
+  // Targets come only from Nexa Fitness; this phone shows them and never sends them back.
+  if(record.type==='targets'){
+    const targets=isRecord(data)?normalizeNutrition(data,'entered'):null;
+    if(targets) householdTargets[record.id]={...targets,updatedAt:safeString(data.updatedAt)}; else delete householdTargets[record.id];
+    return;
+  }
   const upsert=(list,item)=>{ const index=list.findIndex(entry=>entry.id===record.id); if(item){ if(index>=0) list[index]=item; else list.push(item); } else if(index>=0) list.splice(index,1); };
   switch(record.type){
     case 'pantry': upsert(pantryItems,isRecord(data)?normalizePantryItem({...data,id:record.id}):null); break;
@@ -3176,7 +3269,7 @@ function hubPersistAll(){
     writeJSON('fmp_checked',checkedItems); writeJSON('fmp_history',mealHistory); writeJSON('fmp_feedback',mealFeedback);
     if(weekPicks) writeJSON('fmp_week_picks',weekPicks); else localStorage.removeItem('fmp_week_picks');
     if(acceptUndo) writeJSON('fmp_undo_accept',acceptUndo); else localStorage.removeItem('fmp_undo_accept');
-    writeJSON('fmp_mealtypes',mealTypes); savePref();
+    writeJSON('fmp_mealtypes',mealTypes); writeJSON('fmp_targets',householdTargets); savePref();
     writeJSON('fmp_hub_shadow',hubShadow); writeJSON('fmp_hub_cursor',hub.cursor);
     if(hub.household) localStorage.setItem('fmp_hub_household',hub.household);
   } finally { hubApplying=false; }

@@ -4,6 +4,10 @@
 import crypto from 'node:crypto';
 
 export const RECORD_TYPES = ['pantry', 'recipe', 'plan', 'checked', 'history', 'picks', 'feedback', 'prefs', 'planUndo'];
+// Written only through the Fitness link, never by a phone's sync.
+export const SERVER_RECORD_TYPES = ['targets'];
+export const BACKUP_FORMAT = 'nexa-meal-backup/v1';
+const TARGET_KEYS = ['calories', 'protein', 'carbs', 'fat'];
 export const PHOTO_TYPES = { 'image/jpeg': true, 'image/png': true, 'image/webp': true };
 export const PHOTO_ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 export const MAX_JSON = 2 * 1024 * 1024;
@@ -56,6 +60,7 @@ export function createCore({ db, nameOf = key => key, now = () => new Date() }) 
     const records = input.records ?? [], actions = input.actions ?? [];
     if (!Array.isArray(records) || !Array.isArray(actions) || records.length > MAX_ITEMS || actions.length > MAX_ITEMS) throw new HttpError(400, 'records and actions must be lists.');
     for (const record of records) {
+      if (SERVER_RECORD_TYPES.includes(record?.type)) throw new HttpError(403, 'Targets can only be changed from Nexa Fitness.');
       if (!RECORD_TYPES.includes(record?.type) || typeof record.id !== 'string' || !ID_RE.test(record.id)) throw new HttpError(400, 'A record has an unknown type or a bad id.');
     }
     for (const action of actions) {
@@ -137,9 +142,76 @@ export function createCore({ db, nameOf = key => key, now = () => new Date() }) 
     return { cursor: seq, applied, replaced, rejectedActions, skipped: skipped.map(key => key.replace('\u0000', ':')), changes: { records: changedRecords, actions: changedActions } };
   }
 
+  // A member's daily targets, as Nexa Fitness last sent them. Typed in by that person; never calculated here.
+  async function putTargets(memberKey, input) {
+    const targets = {};
+    for (const key of TARGET_KEYS) {
+      const value = input?.[key];
+      if (value === null || value === undefined || value === '') { targets[key] = null; continue; }
+      const number = Number(value);
+      if (!Number.isFinite(number) || number < 0 || number > 20000) throw new HttpError(400, `${key} must be a number from 0 to 20000.`);
+      targets[key] = Math.round(number);
+    }
+    if (TARGET_KEYS.every(key => targets[key] === null)) throw new HttpError(400, 'Send at least one target.');
+    await ensure();
+    const stamp = now().toISOString();
+    const data = JSON.stringify({ ...targets, member: memberKey, source: 'fitness', updatedAt: stamp });
+    await db.transaction(async tx => {
+      let seq = Number((await tx.query("UPDATE meta SET value = value WHERE key = 'seq' RETURNING value", []))[0].value);
+      const [current] = await tx.query("SELECT version FROM records WHERE type = 'targets' AND id = $1", [memberKey]);
+      if (current) await tx.query("UPDATE records SET data = $1, deleted = 0, version = $2, updated_at = $3, updated_by = $4, seq = $5 WHERE type = 'targets' AND id = $6",
+        [data, Number(current.version) + 1, stamp, memberKey, ++seq, memberKey]);
+      else await tx.query("INSERT INTO records (type, id, data, deleted, version, updated_at, updated_by, seq) VALUES ('targets', $1, $2, 0, 1, $3, $4, $5)",
+        [memberKey, data, stamp, memberKey, ++seq]);
+      await tx.query("UPDATE meta SET value = $1 WHERE key = 'seq'", [String(seq)]);
+    });
+    return JSON.parse(data);
+  }
+
+  // Everything except photo bytes (Vercel caps a response at about 4.5 MB); photos are fetched one by one.
+  async function exportAll() {
+    await ensure();
+    return {
+      format: BACKUP_FORMAT,
+      exportedAt: now().toISOString(),
+      household: (await db.query("SELECT value FROM meta WHERE key = 'household'", []))[0].value,
+      seq: Number((await db.query("SELECT value FROM meta WHERE key = 'seq'", []))[0].value),
+      records: (await db.query('SELECT * FROM records ORDER BY seq', [])).map(row => ({ ...row, deleted: Number(row.deleted), version: Number(row.version), seq: Number(row.seq) })),
+      actions: (await db.query('SELECT * FROM actions ORDER BY seq', [])).map(row => ({ ...row, seq: Number(row.seq) })),
+      photos: (await db.query('SELECT id, type, updated_at FROM photos ORDER BY id', [])),
+    };
+  }
+
+  // Loads a backup into an empty database (used to prove a backup restores; never wired to a public route).
+  async function importAll(dump, photos = {}) {
+    if (dump?.format !== BACKUP_FORMAT) throw new Error('Not a meal planner backup.');
+    await ensure();
+    if (Number((await db.query("SELECT value FROM meta WHERE key = 'seq'", []))[0].value) !== 0) throw new Error('Restore only into an empty database.');
+    await db.transaction(async tx => {
+      await tx.query("UPDATE meta SET value = $1 WHERE key = 'household'", [dump.household]);
+      for (const row of dump.records) await tx.query('INSERT INTO records (type, id, data, deleted, version, updated_at, updated_by, seq) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+        [row.type, row.id, row.data, row.deleted, row.version, row.updated_at, row.updated_by, row.seq]);
+      for (const row of dump.actions) await tx.query('INSERT INTO actions (id, key, data, undone_at, created_by, created_at, seq) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+        [row.id, row.key, row.data, row.undone_at, row.created_by, row.created_at, row.seq]);
+      for (const photo of dump.photos) {
+        if (!photos[photo.id]) throw new Error(`Backup is missing photo ${photo.id}.`);
+        await tx.query('INSERT INTO photos (id, type, data, updated_at) VALUES ($1, $2, $3, $4)', [photo.id, photo.type, photos[photo.id], photo.updated_at]);
+      }
+      await tx.query("UPDATE meta SET value = $1 WHERE key = 'seq'", [String(dump.seq)]);
+    });
+  }
+
   return {
     ensure,
     sync,
+    putTargets,
+    exportAll,
+    importAll,
+    async getTargets(memberKey) {
+      await ensure();
+      const [row] = await db.query("SELECT data FROM records WHERE type = 'targets' AND id = $1 AND deleted = 0", [memberKey]);
+      return row ? JSON.parse(row.data) : null;
+    },
     async household() { await ensure(); return (await db.query("SELECT value FROM meta WHERE key = 'household'", []))[0].value; },
     async getPhoto(id) {
       await ensure();

@@ -1,5 +1,6 @@
 // Vercel function for every /api/* route (vercel.json rewrites them here with ?route=...).
 // Data lives in Neon (DATABASE_URL, set by the Neon integration); sign-in uses HOUSEHOLD_PASSCODE and HOUSEHOLD_MEMBERS.
+// BACKUP_TOKEN opens the read-only export for the PC's weekly backup; FITNESS_ORIGINS lists the Fitness sites allowed to link.
 import pg from 'pg';
 import { createCore } from './_lib/core.js';
 import { handleApi, send } from './_lib/http.js';
@@ -14,7 +15,11 @@ function setup() {
   let auth;
   const core = createCore({ db: pgDatabase(pool), nameOf: key => auth.nameOf(key) });
   auth = createPasscodeAuth({ passcode: process.env.HOUSEHOLD_PASSCODE, members: process.env.HOUSEHOLD_MEMBERS, core });
-  app = { core, auth };
+  app = {
+    core, auth,
+    backupToken: process.env.BACKUP_TOKEN,
+    linkOrigins: String(process.env.FITNESS_ORIGINS || 'https://nexa-fitness.vercel.app').split(',').map(origin => origin.trim()).filter(Boolean),
+  };
   return app;
 }
 

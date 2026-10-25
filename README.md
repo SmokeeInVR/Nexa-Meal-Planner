@@ -18,6 +18,13 @@ Vercel environment variables:
 - `HOUSEHOLD_PASSCODE`: at least 8 characters; several words is best. After 10 wrong tries from one address, that address is locked out for 15 minutes.
 - `HOUSEHOLD_MEMBERS`: comma-separated names, e.g. `Marcel, <name>`.
 
+- `BACKUP_TOKEN`: a long random key that opens the read-only `/api/export` for the weekly backup.
+- `FITNESS_ORIGINS` (optional): Fitness sites allowed to link. Defaults to `https://nexa-fitness.vercel.app`.
+
+Weekly backup: `tools/backup-meals.mjs` saves the export and photos to `%USERPROFILE%\NEXA-Data\meal-backups\`, proves each copy restores into an empty database, and keeps the newest 12. It reads `backup-config.json` there (`{"url": "...", "token": "..."}`). `tools/install-backup-task.ps1` schedules it for Sundays at 4 AM.
+
+Nexa Fitness link: `POST /api/link` (household passcode, then a name) returns a key that can only read and set that person's targets through `/api/link/targets`. Phones get the targets by sync and can't change them.
+
 Tests run the same SQL on PGlite (Postgres compiled to WebAssembly): `npm install`, then `npm test`.
 
 ## Household hub on this PC (`hub/server.mjs`, alternative)

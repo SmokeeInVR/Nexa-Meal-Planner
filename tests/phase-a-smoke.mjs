@@ -32,7 +32,9 @@ const forbiddenMarkers = [
   '/api/nexa/chat', '/api/ai/chat', 'SYNC_URL', 'Railway', 'railway',
   'nexa-finance', 'apiKey', 'fmp_key', 'nexa_key', 'keyModal', 'showKeyModal',
   'saveKey', 'clearKey', 'generatePlan', 'swapMeal', 'regenerateGroceryList',
-  'fitness', 'Fitness', 'NEXAFIT', 'Quick Swap', 'quickSwap', 'syncToCloud',
+  // Phase 5 (approved): the app may mention Nexa Fitness, whose targets arrive through the household
+  // server. The old NEXAFIT integration stays banned, and the app never calls the Fitness site itself.
+  'NEXAFIT', 'nexa-fitness.vercel.app', 'Quick Swap', 'quickSwap', 'syncToCloud',
   'loadFromCloud', '☁ Save', '⬇ Sync',
 ];
 for (const marker of forbiddenMarkers) assert.ok(!html.includes(marker), `Prohibited Phase A marker remains: ${marker}`);
@@ -49,7 +51,7 @@ assert.equal(escapeSandbox.escapeHTML('<img src=x onerror="bad"> & \'quoted\''),
 
 const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
 assert.ok(script, 'inline application script must be present');
-const applicationScript = script.replace(/\ninit\(\);\nif\(mealPlan\) renderPlanReady\(\);\s*$/, '').concat(`
+const applicationScript = script.replace(/\r?\ninit\(\);\r?\nif\(mealPlan\) renderPlanReady\(\);\s*$/, '').concat(`
 this.setMealPlanForTest = value => { mealPlan = value; };
 this.setFeedbackForTest = value => { mealFeedback = value; };
 this.getStateForTest = () => ({pantryItems, checkedItems, exclusions, otherExcl, cuisineStyle, weeklyBudget, servings, mealHistory, mealFeedback});

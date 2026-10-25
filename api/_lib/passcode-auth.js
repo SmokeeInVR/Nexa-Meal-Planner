@@ -6,6 +6,7 @@ import { send } from './http.js';
 
 const COOKIE = 'meals_session';
 const SESSION_DAYS = 90;
+const LINK_DAYS = 365;
 
 export function memberList(value) {
   return String(value || '').split(',').map(name => name.trim()).filter(Boolean).slice(0, 8)
@@ -44,7 +45,7 @@ export function createPasscodeAuth({ passcode, members: memberText, core, now = 
         try {
           const session = JSON.parse(Buffer.from(body, 'base64url').toString());
           const member = members.find(entry => entry.key === session.m);
-          if (member && session.exp > now()) return { member };
+          if (member && !session.s && session.exp > now()) return { member };
         } catch {}
       }
       return { status: 401, error: 'Enter the household passcode to sync this phone.', signIn: 'passcode' };
@@ -66,5 +67,31 @@ export function createPasscodeAuth({ passcode, members: memberText, core, now = 
       return send(res, 200, { member: { name: member.name } }, { 'Set-Cookie': cookie(`${body}.${sign(body)}`, SESSION_DAYS * 86400) });
     },
     logout(req, res) { return send(res, 200, { ok: true }, { 'Set-Cookie': cookie('', 0) }); },
+    // Nexa Fitness link key: same passcode check, but the key can only touch that one member's targets.
+    async createLinkToken(req, res, input, headers = {}) {
+      if (!configured) return send(res, notReady.status, { error: notReady.error }, headers);
+      const who = clientKey(req);
+      if (!(await core.loginAllowed(who))) return send(res, 429, { error: 'Too many wrong passcodes. Try again in 15 minutes.' }, headers);
+      if (typeof input?.passcode !== 'string' || !sameText(input.passcode, passcode)) {
+        await core.loginFailed(who);
+        return send(res, 401, { error: "That passcode isn't right." }, headers);
+      }
+      await core.loginSucceeded(who);
+      if (!input.member) return send(res, 200, { members: members.map(({ key: memberKey, name }) => ({ key: memberKey, name })) }, headers);
+      const member = members.find(entry => entry.key === input.member);
+      if (!member) return send(res, 400, { error: 'Pick one of the household names.' }, headers);
+      const body = Buffer.from(JSON.stringify({ m: member.key, s: 'targets', exp: now() + LINK_DAYS * 86400_000 })).toString('base64url');
+      return send(res, 200, { member: { key: member.key, name: member.name }, token: `${body}.${sign(body)}` }, headers);
+    },
+    verifyLinkToken(token) {
+      if (!configured) return null;
+      const [body, signature] = String(token || '').split('.');
+      if (!body || !signature || !sameText(sign(body), signature)) return null;
+      try {
+        const link = JSON.parse(Buffer.from(body, 'base64url').toString());
+        const member = members.find(entry => entry.key === link.m);
+        return member && link.s === 'targets' && link.exp > now() ? member : null;
+      } catch { return null; }
+    },
   };
 }
