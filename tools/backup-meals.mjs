@@ -34,19 +34,27 @@ export async function runBackup({ dir, url, token, fetchImpl = fetch, now = new 
   if (!res.ok) throw new Error(`Export failed: ${res.status} ${(await res.text()).slice(0, 200)}`);
   const dump = await res.json();
   if (dump.format !== 'nexa-meal-backup/v1') throw new Error('The export is not a meal planner backup.');
-  const stamp = now.toISOString().slice(0, 16).replace(/[:T]/g, '-');
-  const folder = path.join(dir, stamp), partial = `${folder}.partial`;
-  fs.rmSync(partial, { recursive: true, force: true });
+  // One folder per run, named by UTC time to the second; a clash (two runs in one second) gets a suffix.
+  const stamp = now.toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  let folder = path.join(dir, stamp);
+  for (let n = 2; fs.existsSync(folder); n++) folder = path.join(dir, `${stamp}-${n}`);
+  const partial = `${folder}.partial`;
   fs.mkdirSync(path.join(partial, 'photos'), { recursive: true });
-  for (const photo of dump.photos) {
-    const photoRes = await fetchImpl(`${url.replace(/\/$/, '')}/api/export/photos/${encodeURIComponent(photo.id)}`, { headers });
-    if (!photoRes.ok) throw new Error(`Photo ${photo.id} failed: ${photoRes.status}`);
-    fs.writeFileSync(path.join(partial, 'photos', `${photo.id}${EXT[photo.type] || '.bin'}`), Buffer.from(await photoRes.arrayBuffer()));
+  let counts;
+  try {
+    for (const photo of dump.photos) {
+      const photoRes = await fetchImpl(`${url.replace(/\/$/, '')}/api/export/photos/${encodeURIComponent(photo.id)}`, { headers });
+      if (!photoRes.ok) throw new Error(`Photo ${photo.id} failed: ${photoRes.status}`);
+      fs.writeFileSync(path.join(partial, 'photos', `${photo.id}${EXT[photo.type] || '.bin'}`), Buffer.from(await photoRes.arrayBuffer()));
+    }
+    fs.writeFileSync(path.join(partial, 'backup.json'), JSON.stringify(dump));
+    counts = await verifyBackup(partial);
+    fs.renameSync(partial, folder);
+  } catch (error) {
+    fs.rmSync(partial, { recursive: true, force: true });
+    throw error;
   }
-  fs.writeFileSync(path.join(partial, 'backup.json'), JSON.stringify(dump));
-  const counts = await verifyBackup(partial);
-  fs.renameSync(partial, folder);
-  const backups = fs.readdirSync(dir).filter(name => /^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}$/.test(name)).sort();
+  const backups = fs.readdirSync(dir).filter(name => /^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}(-\d{2})?(-\d+)?$/.test(name)).sort();
   backups.slice(0, Math.max(0, backups.length - KEEP)).forEach(name => fs.rmSync(path.join(dir, name), { recursive: true, force: true }));
   return { folder, ...counts };
 }
